@@ -43,6 +43,7 @@ class YamFollower(Robot):
         self._stop = threading.Event()
         self._thread = None
         self._target = None             # (7,) latest action, clipped
+        self.web = None
         self.cmd = None                 # (7,) what is being commanded now
         self.vff = np.zeros(6)
         self.mode = "floating"
@@ -103,6 +104,13 @@ class YamFollower(Robot):
         t0 = time.time()
         while self._state is None and time.time() - t0 < 2.0:
             time.sleep(0.01)
+        self.web = None
+        if self.config.web_port:
+            try:
+                from yam_teleop.web import WebPage
+                self.web = WebPage(self, self.config.web_port); self.web.start()
+            except Exception as e:
+                log.warning(f"session page not started: {e}")
         log.info(f"{self} connected: floating until the first action")
 
     def disconnect(self) -> None:
@@ -120,6 +128,8 @@ class YamFollower(Robot):
                 if hasattr(self.arm, "close"):
                     self.arm.close()
                 self.arm = None
+        if getattr(self, "web", None) is not None:
+            self.web.stop()
         for cam in self.cameras.values():
             if cam.is_connected:
                 cam.disconnect()

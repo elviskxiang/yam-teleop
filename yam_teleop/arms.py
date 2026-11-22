@@ -28,6 +28,18 @@ def publish_leader(q):
         _leader["q"], _leader["t"] = np.array(q, float), time.time()
 
 
+_grip = {"target": 1.0}
+
+
+def set_grip_target(g):
+    """Gripper target (0 closed .. 1 open), from the keyboard (leader plugin) or the web page (follower plugin)."""
+    _grip["target"] = float(min(1.0, max(0.0, g)))
+
+
+def grip_target():
+    return _grip["target"]
+
+
 def leader_q(max_age=0.5):
     """Latest leader joint angles, or the rest pose (zeros) if no leader is running / its data is stale."""
     with _leader_lock:

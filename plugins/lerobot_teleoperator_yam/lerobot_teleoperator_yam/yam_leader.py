@@ -64,8 +64,8 @@ class YamLeader(Teleoperator):
                 def on_press(key):
                     ch = getattr(key, "char", None)
                     if ch and ch.lower() in GRIP_KEYS:
-                        self.grip_target = GRIP_KEYS[ch.lower()]
-                        log.info(f"gripper target {self.grip_target:.2f}")
+                        A.set_grip_target(GRIP_KEYS[ch.lower()])
+                        log.info(f"gripper target {A.grip_target():.2f}")
                 self._listener = keyboard.Listener(on_press=on_press)
                 self._listener.start()
             except Exception as e:
@@ -77,7 +77,8 @@ class YamLeader(Teleoperator):
             raise RuntimeError(f"{self}: the leader (left) arm stopped responding (a motor dropped off CAN)")
         q = np.asarray(self.arm.get_observations()["joint_pos"], float)
         A.publish_leader(q)
-        return {**{f"{n}.pos": float(v) for n, v in zip(A.JOINTS, q)}, f"{A.GRIPPER}.pos": float(self.grip_target)}
+        self.last_q = q
+        return {**{f"{n}.pos": float(v) for n, v in zip(A.JOINTS, q)}, f"{A.GRIPPER}.pos": A.grip_target()}
 
     def send_feedback(self, feedback: dict) -> None:
         pass

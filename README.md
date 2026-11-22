@@ -43,7 +43,10 @@ Only one program may use the arms and cameras at a time (`record.sh` checks).
 - Each episode lasts up to 90 s: **→** ends it early (saved), **←** discards and re-records it, **Esc** stops the session.
   Between episodes there is a 30 s reset period (**→** skips it).
 - At the end both arms ramp to the rest pose before torque is cut, the leader too: let go of it when Esc is pressed.
-- A rerun window shows the cameras and joint values live.
+- **Session page: http://127.0.0.1:8780** (same layout as the old teleop page): the four cameras pinned at the top,
+  follower state (floating / engaging / following / held / FAULT, and *blocked: …* when the safety check stops a move),
+  episode state read from lerobot-record (RECORDING episode N + elapsed time, RESET), buttons **Save & next** (→),
+  **Re-record** (←), **Stop session** (Esc) and the four gripper buttons. A rerun window also shows cameras and joints.
 
 Follower safety (`plugins/lerobot_robot_yam`, every 10 ms): targets clipped to the joint limits and slewed at ≤ 1.5
 rad/s (`--robot.max_vel`) with a velocity feed-forward (`--robot.vff`); a target the rig model says hits the table, the

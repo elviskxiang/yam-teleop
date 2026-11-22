@@ -30,4 +30,5 @@ class YamFollowerConfig(RobotConfig):
     grav_factor: list[float] = field(default_factory=lambda: [1.0, 1.1, 1.1, 1.2, 1.0, 1.0])
     scene_xml: str = ""             # rig model for collision checks; default: $RUBIKS/poc/generated/scene.xml
     park_on_disconnect: bool = True # ramp to the rest pose before cutting torque
+    web_port: int = 8780            # session page (cameras, state, episode + gripper buttons); 0 = off
     mock: bool = False              # no hardware: a simulated arm (for testing the pipeline)
