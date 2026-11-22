@@ -40,12 +40,15 @@ class EpisodeLog(logging.Handler):
         self.state, self.episode, self.t0 = "starting", None, None
         self.discard = False            # the current episode will be thrown away (left arrow)
         self.first = None               # dataset episode count when the session started
+        self.after_save = None          # dataset episode count after the last save (yam_teleop.record_session)
         self.final = None               # dataset episode count after the session stopped
 
     @property
     def in_dataset(self):
         if self.final is not None:
             return self.final
+        if self.after_save is not None:
+            return self.after_save
         return self.episode if self.episode is not None else self.first
 
     def emit(self, record):
@@ -57,13 +60,19 @@ class EpisodeLog(logging.Handler):
             n = int(g.group(1))
             if self.first is None:
                 self.first = n
-            self.state, self.episode, self.t0, self.discard = "recording", n, time.time(), False
+            self.state, self.episode, self.t0, self.discard, self.after_save = "recording", n, time.time(), False, None
         elif m.startswith("Reset the environment"):
             self.state, self.t0 = "waiting", time.time()
+        elif m.startswith("Saving episode"):
+            self.state = "saving"
+        elif (g := re.match(r"Episode (\d+) saved", m)):
+            self.after_save, self.state, self.t0 = int(g.group(1)) + 1, "waiting", time.time()
         elif m.startswith("Re-record episode"):
             self.state = "discarding"
         elif m.startswith("Stop recording"):
-            if self.episode is not None:
+            if self.after_save is not None:
+                self.final = self.after_save
+            elif self.episode is not None:
                 self.final = self.episode + (0 if self.discard else 1)
             self.state, self.t0 = "stopped", time.time()
 
@@ -73,7 +82,7 @@ class EpisodeLog(logging.Handler):
             self.state, self.t0 = "stopping", time.time()
             self.discard = k == "left"
         elif self.state == "waiting" and k == "right":
-            self.state = "discarding" if self.discard else "saving"
+            self.state = "discarding" if self.discard else "starting next"
         elif k == "esc":
             self.state = "stopping session"
 
@@ -111,7 +120,7 @@ async function post(p,b){try{const r=await (await fetch(p,{method:'POST',body:JS
 const f=v=>v==null?'-':v.map(x=>x.toFixed(2)).join(' ');
 setInterval(async()=>{try{const s=await (await fetch('/status')).json();
  mode.textContent=s.fault?'FAULT: '+s.fault:s.mode.toUpperCase();mode.className='big '+(s.fault?'fault':s.mode);blocked.textContent=s.blocked?'blocked: '+s.blocked:'';
- const e=s.episode;ep.textContent=e.state==='recording'?'● RECORDING episode '+e.episode+'  '+e.elapsed+' s':e.state==='waiting'?'WAITING: episode '+e.episode+(e.discard?' will be discarded':' will be saved')+' on → / Esc':e.state.toUpperCase();
+ const e=s.episode;ep.textContent=e.state==='recording'?'● RECORDING episode '+e.episode+'  '+e.elapsed+' s':e.state==='waiting'?(e.discard?'WAITING: episode '+e.episode+' discarded':'WAITING: episode '+e.episode+' saved')+', → starts the next':e.state.toUpperCase();
  ep.className='big '+(e.state==='recording'?'recording':'');epd.textContent=`in dataset ${e.in_dataset??'-'}   saved this session ${e.saved??0}   gripper target ${s.grip.toFixed(2)}`;
  st.textContent=`leader q    ${f(s.leader_q)}\nfollower q  ${f(s.pos)}\ncommand     ${f(s.cmd)}\neffort      ${f(s.effort)}`}catch(e){mode.textContent='page server not reachable (session ended?)';mode.className='big fault'}},250);
 </script>"""
@@ -211,12 +220,12 @@ class WebPage:
                         return
                     k = page.keys[b["k"]]; page.kb.press(k); page.kb.release(k)
                     e.key(b["k"])
-                    msg = {"stopping": "episode stopped: press Start next episode to save it (or End session)",
-                           "saving": "saving the episode (a few seconds), then the next one starts",
-                           "discarding": "discarded: the same episode number is recorded again",
+                    msg = {"stopping": "episode stopped: saving it now (a few seconds)",
+                           "starting next": "starting the next episode",
+                           "discarding": "recording the discarded episode again",
                            "stopping session": "ending the session: both arms park, then torque is cut"}.get(e.state, e.state)
                     if e.state == "stopping" and e.discard:
-                        msg = "episode stopped and will be DISCARDED: press Start next episode to record it again"
+                        msg = "episode stopped and DISCARDED (not saved)"
                 else:
                     msg = "not available"
                 try:

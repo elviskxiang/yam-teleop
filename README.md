@@ -43,7 +43,7 @@ Only one program may use the arms and cameras at a time (`record.sh` checks).
 - Each episode lasts up to 90 s: **→** ends it early (saved), **←** discards and re-records it, **Esc** stops the session.
   Between episodes there is a 30 s reset period (**→** skips it).
 - At the end both arms ramp to the rest pose before torque is cut, the leader too: let go of it when Esc is pressed.
-- **Session page: http://127.0.0.1:8780** (same layout as the old teleop page): the four cameras pinned at the top,
+- **Session page: http://127.0.0.1:8780** (same layout as the old teleop page): the cameras pinned at the top,
   follower state (floating / engaging / following / held / FAULT, and *blocked: …* when the safety check stops a move),
   episode state read from lerobot-record (RECORDING episode N + elapsed time, RESET), buttons **Save & next** (→),
   **Re-record** (←), **Stop session** (Esc) and the four gripper buttons. A rerun window also shows cameras and joints.
@@ -70,7 +70,7 @@ Dataset features (what `lerobot-record` writes for `yam_follower`):
 |---|---|---|
 | `observation.state` | 21 | `joint1..6, gripper` × `.pos` (rad; gripper 0 closed..1 open), `.vel`, `.effort` |
 | `action` | 7 | `joint1..6.pos, gripper.pos`: the leader's joint angles and the gripper target (LeRobot stores the teleoperator's action) |
-| `observation.images.{c922, d415_tripod_top, microdia_left_side, microdia_right_base_plate}` | 480×640×3 | video, 30 fps |
+| `observation.images.{c922, d415_tripod_top, microdia_right_base_plate}` | 480×640×3 | video, 30 fps |
 
 `.effort` is the rig's force signal: there is no force/torque sensor, so it is the motor torque beyond the URDF gravity
 model (joints 1-6, N m) and the gripper motor's effort. It also contains tracking and friction torque. On the first screw
@@ -112,7 +112,15 @@ source env.sh && PYTHONPATH=$LR_PYTHONPATH $LR_PY -m yam_teleop.control      # -
 ```
 
 Always on: live camera previews while idle; **Start recording** launches `record.sh` (lerobot-record) for the dataset
-named on the page and episode 0 begins. **Stop episode** / **Stop & discard** end an episode; the session then waits
-(arms keep following) until **Start next episode** (that is when LeRobot saves the previous one, a few seconds) or
-**End session** (saves a pending episode, parks both arms, cuts torque). Gripper buttons, follower state and the session
-log are on the same page. Episodes still end on their own after 90 s. `--mock` uses simulated arms for testing.
+named on the page and the first episode begins. **Stop episode** ends it and **saves it immediately** (a few seconds of
+video encoding); **Stop & discard** ends it without saving. The session then waits (arms keep following) until
+**Start next episode** or **End session** (click twice: both arms park, torque is cut). Gripper buttons, follower state
+and the session log are on the same page. Episodes still end (and save) on their own after 90 s. `--mock` uses
+simulated arms for testing.
+
+Immediate saving: LeRobot 0.5's `record()` saves an episode only after its reset period; `record.sh` runs
+`yam_teleop.record_session`, which is `lerobot-record` unchanged except that it saves when the reset period begins.
+
+Cameras: `microdia_left_side` was dropped on Nov 22 (its view was disturbed). It is no longer recorded or converted, and
+it was removed from `data/lerobot/screw_from_rest` with `lerobot-edit-dataset --operation.type remove_feature`; the
+4-camera original is in `data/lerobot/_backup_screw_from_rest_4cam`.

@@ -8,13 +8,14 @@ _BY_PATH = "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:"
 
 
 def rig_cameras() -> dict[str, CameraConfig]:
-    """The four rig cameras at 640x480 MJPG 30 fps, addressed by USB port path / serial (videoN numbers move on replug).
-    Names match the datasets converted from the earlier MCAP episodes (yam_teleop.to_lerobot)."""
+    """The rig cameras at 640x480 MJPG 30 fps, addressed by USB port path / serial (videoN numbers move on replug).
+    Names match the datasets converted from the earlier MCAP episodes (yam_teleop.to_lerobot).
+    microdia_left_side (usb-0:2.1) was dropped on Nov 22 (its view was disturbed): not recorded, and removed from the
+    existing datasets."""
     cam = lambda p: OpenCVCameraConfig(index_or_path=p, fps=30, width=640, height=480, fourcc="MJPG")
     return {
         "c922": cam("/dev/v4l/by-id/usb-046d_C922_Pro_Stream_Webcam_A579FDAF-video-index0"),
         "d415_tripod_top": cam(_BY_PATH + "12:1.3-video-index0"),
-        "microdia_left_side": cam(_BY_PATH + "2.1:1.0-video-index0"),
         "microdia_right_base_plate": cam(_BY_PATH + "10:1.0-video-index0"),
     }
 

@@ -96,8 +96,11 @@ def main():
     if Path(a.root).exists():
         raise SystemExit(f"{a.root} exists; pick a new --root")
     ds = None; cam_list = None; n_ok = 0
+    from lerobot_robot_yam.config_yam_follower import rig_cameras
+    rig = set(rig_cameras())                             # cameras dropped from the rig (microdia_left_side) are skipped
     for p in files:
         task, cams, tel = read_episode(p)
+        cams = {k: v for k, v in cams.items() if k in rig}
         if a.task is not None and task != a.task:
             print(f"skip {p.name}: task {task!r}"); continue
         if not tel or not cams:

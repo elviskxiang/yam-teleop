@@ -15,7 +15,8 @@ if [ -n "$busy" ]; then
   echo "These hold the arms or cameras; stop them first (park the arms from their page):"; echo "$busy"; exit 1
 fi
 echo "recording $n episode(s) of '${TASK:-$name}' into $root (resume=$resume)"
-exec env PYTHONPATH="$LR_PYTHONPATH" "$(dirname "$LR_PY")/lerobot-record" \
+# lerobot-record via yam_teleop.record_session: identical, except each episode is saved the moment it stops
+exec env PYTHONPATH="$LR_PYTHONPATH" "$LR_PY" -m yam_teleop.record_session \
   --robot.type=yam_follower --robot.id=right \
   --teleop.type=yam_leader --teleop.id=left \
   --dataset.repo_id="local/$name" --dataset.root="$root" --dataset.single_task="${TASK:-$name}" \

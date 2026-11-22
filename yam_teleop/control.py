@@ -164,7 +164,7 @@ pre{margin:0;font:11.5px/1.4 ui-monospace,monospace;white-space:pre-wrap}#msg{fo
   <div id=idle><input type=text id=ds value="screw_from_rest" placeholder="dataset (data/lerobot/&lt;name&gt;)"><input type=text id=task value="screw_from_rest" placeholder="task label">
    <div class=row><button class=rec onclick="post('/start',{dataset:ds.value,task:task.value})">● Start recording</button></div></div>
   <div id=rec style=display:none><div class=row><button id=b1 class=go onclick="post('/key',{k:'right'})">■ Stop episode</button><button id=b2 onclick="post('/key',{k:'left'})">✕ Stop &amp; discard</button></div>
-   <div class=row><button class=warn onclick="if(confirm('End the session? Both arms park at rest, then torque is cut.'))post('/key',{k:'esc'})">End session (park arms)</button></div></div></div>
+   <div class=row><button class=warn id=endb onclick="endSession()">End session (park arms)</button></div></div></div>
  <div class=box><h2>Follower (right arm)</h2><div id=mode class=big>-</div><div id=blocked class=bad></div></div>
  <div class=box><h2>Gripper</h2><div class=row><button class=g onclick="post('/grip',{g:1})">Open <kbd>V</kbd></button><button class=g onclick="post('/grip',{g:0.62})">Cube width <kbd>B</kbd></button><button class=g onclick="post('/grip',{g:0.45})">Squeeze <kbd>C</kbd></button><button class=g onclick="post('/grip',{g:0})">Close <kbd>Z</kbd></button></div></div>
  <div class=box><h2>State</h2><div id=msg></div><pre id=st></pre></div>
@@ -176,6 +176,9 @@ function setCams(n){const k=n.join('|');if(k===camsKey)return;camsKey=k;cams.inn
 fetch('/cams').then(r=>r.json()).then(setCams);
 async function post(p,b){try{const r=await (await fetch(p,{method:'POST',body:JSON.stringify(b||{})})).json();msg.textContent=r.msg;msg.className=/^(a session|not|no session|request)/.test(r.msg)?'bad':'good'}catch(e){msg.textContent='request failed: '+e;msg.className='bad'}}
 const f=v=>v==null?'-':v.map(x=>x.toFixed(2)).join(' ');
+let endArmed=0;   // two clicks within 4 s (browser confirm() pop-ups are blocked in embedded browsers)
+function endSession(){if(Date.now()-endArmed<4000){endArmed=0;endb.textContent='End session (park arms)';post('/key',{k:'esc'});return}
+ endArmed=Date.now();endb.textContent='Click again to end: both arms park, torque off';setTimeout(()=>{if(endArmed&&Date.now()-endArmed>=4000){endArmed=0;endb.textContent='End session (park arms)'}},4100)}
 setInterval(async()=>{try{const s=await (await fetch('/status?ds='+encodeURIComponent(ds.value))).json();
  idle.style.display=s.session?'none':'';rec.style.display=s.session?'':'none';
  document.querySelectorAll('button.g').forEach(b=>b.disabled=!(s.session&&s.live));
@@ -185,11 +188,11 @@ setInterval(async()=>{try{const s=await (await fetch('/status?ds='+encodeURIComp
  if(!L){ep.textContent='STARTING: connecting arms and cameras…';ep.className='big engaging';epd.textContent=`dataset ${s.dataset}: ${s.episodes_in_dataset} episodes`;return}
  const e=L.episode,rec_=e.state==='recording',wait=e.state==='waiting';
  ep.textContent=rec_?'● RECORDING episode '+e.episode+'  '+e.elapsed+' s'
-  :wait?(e.discard?'WAITING: episode '+e.episode+' will be DISCARDED, then re-recorded':'WAITING: episode '+e.episode+' will be saved')
-  :({stopping:'STOPPING the episode…',saving:'SAVING the episode (a few seconds)…',discarding:'DISCARDING, then re-recording…',
+  :wait?(e.discard?'WAITING: episode '+e.episode+' discarded (not saved)':'WAITING: episode '+e.episode+' saved ✓')
+  :({stopping:'STOPPING the episode…',saving:'SAVING episode '+e.episode+' (a few seconds)…','starting next':'STARTING the next episode…',discarding:'RE-RECORDING the discarded episode…',
      'stopping session':'ENDING SESSION: arms parking…',stopped:'SESSION ENDED',starting:'STARTING…'}[e.state]||e.state.toUpperCase());
  ep.className='big '+(rec_?'recording':e.state.split(' ')[0]);
- epd.textContent=`dataset ${s.dataset}: ${e.in_dataset??s.episodes_in_dataset} episodes saved   (${e.saved??0} this session)`+(wait?'\nleave the arms where you like: they keep following until the next episode starts':'');
+ epd.textContent=`dataset ${s.dataset}: ${e.in_dataset??s.episodes_in_dataset} episodes saved   (${e.saved??0} this session)`+(wait?'\nthe arms keep following; reset the scene, then Start next episode':'');
  b1.textContent=wait?'▶ Start next episode':'■ Stop episode';b1.className=wait?'rec':'go';b1.disabled=!(rec_||wait);b2.disabled=!rec_;
  mode.textContent=L.fault?'FAULT: '+L.fault:L.mode.toUpperCase();mode.className='big '+(L.fault?'fault':L.mode);blocked.textContent=L.blocked?'blocked: '+L.blocked:'';
  st.textContent=`gripper target ${L.grip.toFixed(2)}\nleader q    ${f(L.leader_q)}\nfollower q  ${f(L.pos)}\ncommand     ${f(L.cmd)}\neffort      ${f(L.effort)}`}catch(e){}},300);
