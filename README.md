@@ -42,7 +42,7 @@ Then open http://127.0.0.1:8780:
 1. Both arms start **floating** (gravity compensation from the URDF, all six joints). Hold the left arm.
 2. **Engage** (`E`): the right arm moves slowly (0.35 rad/s) to the left arm's pose, then follows it.
 3. Type the task. **Start** (`space`) records an episode; `space` again saves it; **Discard** (`X`) throws it away.
-4. Gripper from the page or keys: **Open** `V`, **Cube width** `B`, **Squeeze** `C` (13 N cap).
+4. Gripper from the page or keys: **Open** `V`, **Cube width** `B`, **Squeeze** `C`, **Close** fully `Z` (all force-capped at 13 N).
 5. **Float** (`Q`) to let go of the right arm; **Park and release** at the end of the session.
 
 What the follower does to stay safe, every 10 ms: targets clipped to the joint limits and slewed at ≤ 1.5 rad/s

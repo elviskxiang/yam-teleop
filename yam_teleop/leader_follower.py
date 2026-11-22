@@ -43,7 +43,7 @@ J_HI = np.array([3.05433, 3.66519, 3.66519, 1.5708, 1.5708, 2.0944 - np.radians(
 ENGAGE_VEL, TRACK_STOP, ENGAGED_TOL = 0.35, 0.30, 0.02
 FLOOR_Z = 0.735                       # grasp point may not go below the table top (m, world)
 GRIP_VEL = 1.5                        # normalized gripper units per second
-GRIP_PRESETS = {"open": 1.0, "cube": 0.62, "squeeze": 0.45}
+GRIP_PRESETS = {"open": 1.0, "cube": 0.62, "squeeze": 0.45, "close": 0.0}   # close: fully shut, still force-capped (13 N)
 
 
 class Collision:
@@ -324,7 +324,7 @@ kbd{background:#2a2f36;border-radius:3px;padding:0 4px;font:11px ui-monospace,mo
   <input type=text id=task placeholder="task, e.g. pick up the cube and place it on the tape">
   <div class=row style="margin-top:6px"><button id=recbtn class=rec onclick="toggleRec()">Start <kbd>space</kbd></button><button onclick="post('/episode/discard')">Discard <kbd>X</kbd></button></div>
   <pre id=ep></pre></div>
- <div class=box><h2>Gripper</h2><div class=row><button onclick="post('/grip',{g:1})">Open <kbd>V</kbd></button><button onclick="post('/grip',{g:0.62})">Cube width <kbd>B</kbd></button><button onclick="post('/grip',{g:0.45})">Squeeze <kbd>C</kbd></button></div></div>
+ <div class=box><h2>Gripper</h2><div class=row><button onclick="post('/grip',{g:1})">Open <kbd>V</kbd></button><button onclick="post('/grip',{g:0.62})">Cube width <kbd>B</kbd></button><button onclick="post('/grip',{g:0.45})">Squeeze <kbd>C</kbd></button><button onclick="post('/grip',{g:0})">Close <kbd>Z</kbd></button></div></div>
  <div class=box><h2>State</h2><div id=msg>…</div><pre id=st></pre></div>
  <div class=box><div class=row><button onclick="post('/park')">Park at rest</button><button class=warn onclick="if(confirm('Park both arms and cut torque?'))post('/release')">Park and release</button></div></div>
 </div></div>
@@ -344,7 +344,7 @@ function show(s){S=s;const rec=s.episode.state==='recording';mode.textContent=re
 setInterval(async()=>{try{show(await (await fetch('/telemetry')).json())}catch(e){}},200);
 addEventListener('keydown',e=>{if(e.target.tagName==='INPUT'){if(e.key==='Enter')e.target.blur();return}const k=e.key.toLowerCase();
  if(k===' '){e.preventDefault();toggleRec()}else if(k==='x')post('/episode/discard');else if(k==='e')post('/engage');else if(k==='q')post('/disengage');
- else if(k==='v')post('/grip',{g:1});else if(k==='b')post('/grip',{g:0.62});else if(k==='c')post('/grip',{g:0.45})});
+ else if(k==='v')post('/grip',{g:1});else if(k==='b')post('/grip',{g:0.62});else if(k==='c')post('/grip',{g:0.45});else if(k==='z')post('/grip',{g:0})});
 </script>"""
 CAM_NAMES = ["D415 (tripod, top)", "C922", "Microdia left", "Microdia right"]
 
