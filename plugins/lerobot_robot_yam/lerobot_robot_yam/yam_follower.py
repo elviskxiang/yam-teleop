@@ -28,6 +28,7 @@ from .config_yam_follower import YamFollowerConfig
 log = logging.getLogger(__name__)
 DT = 0.01
 NAMES = A.JOINTS + [A.GRIPPER]
+YIELD_REJOIN = 0.05             # rad: a yielded wrist joint rejoins once the leader's is this close to it
 
 
 class YamFollower(Robot):
@@ -50,6 +51,7 @@ class YamFollower(Robot):
         self.blocked = None
         self.fault = None
         self._hold_until = 0.0
+        self._yield = set()             # wrist joints (index 3-5) giving way after being blocked
         self._state = None
         self._factor = np.asarray(config.grav_factor, float)
 
@@ -174,34 +176,54 @@ class YamFollower(Robot):
         if tgt is None:
             return
         now = time.time()
+        g_tgt = float(np.clip(tgt[6], 0, 1))
+        grip_step = lambda c: c + float(np.clip(g_tgt - c, -A.GRIP_VEL * DT, A.GRIP_VEL * DT))
         if self.mode == "floating" or (self.mode == "held" and now >= self._hold_until):
-            self.cmd = np.r_[q, g]; self.vff = np.zeros(6); self.mode = "engaging"
+            self.cmd = np.r_[q, g if self.cmd is None or self.mode == "floating" else self.cmd[6]]
+            self.vff = np.zeros(6); self.mode = "engaging"; self._yield = set()
             self.arm.command_joint_pos(self.cmd)
             return
-        if self.mode == "held":
-            return                                   # holding at its last command until _hold_until
+        if self.mode == "held":                      # joints hold until _hold_until; the gripper still obeys (to let go)
+            self.cmd[6] = grip_step(self.cmd[6])
+            self.arm.command_joint_pos(self.cmd)
+            return
         lq = A.leader_q()
         target = np.clip(tgt[:6], A.J_LO, A.J_HI)
+        # a blocked wrist joint gives way (commanded where it is) until the leader's comes back to it
+        for j in sorted(self._yield):
+            if abs(target[j] - q[j]) < YIELD_REJOIN:
+                self._yield.discard(j); log.info(f"{self}: joint {j + 1} rejoined")
         vel = A.ENGAGE_VEL if self.mode == "engaging" else self.config.max_vel
         q_new = self.cmd[:6] + np.clip(target - self.cmd[:6], -vel * DT, vel * DT)
-        g_new = self.cmd[6] + np.clip(float(np.clip(tgt[6], 0, 1)) - self.cmd[6], -A.GRIP_VEL * DT, A.GRIP_VEL * DT)
+        for j in self._yield:
+            q_new[j] = q[j]
         hit = self.col.check(q_new, lq)
         self.blocked = hit
         if hit:
             q_new = self.cmd[:6]
         v_raw = (q_new - self.cmd[:6]) / DT
         self.vff = np.zeros(6) if hit else (1 - A.VFF_ALPHA) * self.vff + A.VFF_ALPHA * v_raw
-        self.cmd = np.r_[q_new, g_new]
+        for j in self._yield:
+            self.vff[j] = 0.0
+        self.cmd = np.r_[q_new, grip_step(self.cmd[6])]
         self._send(self.cmd, self.vff * self.config.vff)
-        if self.mode == "engaging" and np.abs(target - q_new).max() < 0.02:
+        if self.mode == "engaging" and np.abs(np.delete(target - q_new, list(self._yield))).max(initial=0.0) < 0.02:
             self.mode = "following"; log.info(f"{self}: following")
         lag = np.abs(self.cmd[:6] - q)
-        if lag.max() > A.TRACK_STOP:
+        wrist = [j for j in (3, 4, 5) if lag[j] > A.TRACK_STOP and j not in self._yield]
+        for j in wrist:                              # wrist: give way, the rest of the arm keeps following
+            self._yield.add(j); self.cmd[j] = q[j]; self.vff[j] = 0.0
+            log.warning(f"{self}: joint {j + 1} blocked ({lag[j]:.2f} rad behind): it gives way until the leader's joint "
+                        f"{j + 1} comes back to it; open the gripper if it is clamped on something")
+        if lag[:3].max() > A.TRACK_STOP:             # shoulder / elbow: hold the whole arm, then re-engage slowly
             self.cmd = np.r_[q, self.cmd[6]]; self.vff = np.zeros(6)
             self.arm.command_joint_pos(self.cmd)
             self.mode, self._hold_until = "held", now + 1.0
-            log.warning(f"{self}: joint {int(lag.argmax()) + 1} fell {lag.max():.2f} rad behind (touching something?); "
+            log.warning(f"{self}: joint {int(lag[:3].argmax()) + 1} fell {lag[:3].max():.2f} rad behind (touching something?); "
                         f"holding 1 s, then re-engaging slowly")
+        if self._yield and not self.blocked:
+            self.blocked = (f"wrist joint {', '.join(str(j + 1) for j in sorted(self._yield))} blocked and giving way: bring the "
+                            f"leader's wrist back to it (or open the gripper)")
 
     # ---- LeRobot API
     def get_observation(self) -> dict:
