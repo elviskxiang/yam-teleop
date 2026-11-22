@@ -8,5 +8,9 @@ export PYTHONPATH="$YT_ROOT:$RUBIKS:$RUBIKS/scripts/hw:$RUBIKS/vendor/i2rt:$RUBI
 export HW_PY="$RUBIKS/.venv-warp/bin/python"   # mujoco + numpy + scipy; the SDK comes from PYTHONPATH
 export REC_PY="$RUBIKS/.venv-hw/bin/python"    # mcap writer
 export CAM_PY="$RUBIKS/../.venv-ir/bin/python" # OpenCV with V4L2 for the cameras
-export LEROBOT_ENV="${LEROBOT_ENV:-lerobot-libero}"   # conda env with lerobot 0.5.x (training)
+export LEROBOT_ENV="${LEROBOT_ENV:-lerobot-libero}"   # conda env with lerobot 0.5.x (recording, training)
+export LR_PY="${LR_PY:-$(conda info --base 2>/dev/null || echo $HOME/miniconda3)/envs/$LEROBOT_ENV/bin/python}"
+# for the LeRobot env: this repo + the I2RT SDK + the rig's yam_io; NOT vendor/hwdeps (built for Python 3.13, it would
+# shadow the env's own cv2 / pydantic)
+export LR_PYTHONPATH="$YT_ROOT:$RUBIKS/scripts/hw:$RUBIKS/vendor/i2rt"
 [ -d "$RUBIKS/vendor/i2rt" ] || echo "env.sh: RUBIKS=$RUBIKS has no vendor/i2rt; set RUBIKS to the robotics-rubiks-cube checkout" >&2

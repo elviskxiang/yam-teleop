@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lerobot_robot_yam"
+version = "0.1.0"
+description = "I2RT YAM follower arm (right) for LeRobot, with the rig's safety layer (yam-teleop)"
+requires-python = ">=3.10"
+
+[tool.setuptools]
+packages = ["lerobot_robot_yam"]

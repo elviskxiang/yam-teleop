@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: lerobot_teleoperator_yam
+Version: 0.1.0
+Summary: I2RT YAM leader arm (left, moved by hand) as a LeRobot teleoperator (yam-teleop)
+Requires-Python: >=3.10

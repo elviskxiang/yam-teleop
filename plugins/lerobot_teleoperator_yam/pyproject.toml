@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lerobot_teleoperator_yam"
+version = "0.1.0"
+description = "I2RT YAM leader arm (left, moved by hand) as a LeRobot teleoperator (yam-teleop)"
+requires-python = ">=3.10"
+
+[tool.setuptools]
+packages = ["lerobot_teleoperator_yam"]
