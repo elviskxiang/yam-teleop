@@ -26,11 +26,27 @@ log = logging.getLogger(__name__)
 
 
 class EpisodeLog(logging.Handler):
-    """Tracks lerobot-record's episode state from its log messages."""
+    """Tracks lerobot-record's episode state from its log messages. LeRobot 0.5's order per episode:
+         "Recording episode N" -> record (until time-out or right/left arrow)
+         -> "Reset the environment" -> wait (until reset_time_s or right arrow)
+         -> left arrow was pressed during the episode? "Re-record episode", nothing saved, same N again
+            otherwise save_episode() (encodes the videos: a few seconds) -> "Recording episode N+1"
+       Esc ends the loop; an episode in progress or waiting is still saved (unless it was discarded).
+    N is the dataset's episode count, so episodes in the dataset = N while recording episode N.
+    States: starting, recording, stopping, waiting, saving, discarding, stopped."""
 
     def __init__(self):
         super().__init__(logging.INFO)
-        self.state, self.episode, self.t0, self.saved_this_session = "starting", None, None, 0
+        self.state, self.episode, self.t0 = "starting", None, None
+        self.discard = False            # the current episode will be thrown away (left arrow)
+        self.first = None               # dataset episode count when the session started
+        self.final = None               # dataset episode count after the session stopped
+
+    @property
+    def in_dataset(self):
+        if self.final is not None:
+            return self.final
+        return self.episode if self.episode is not None else self.first
 
     def emit(self, record):
         try:
@@ -38,19 +54,28 @@ class EpisodeLog(logging.Handler):
         except Exception:
             return
         if (g := re.match(r"Recording episode (\d+)", m)):
-            if self.state == "recording":
-                self.saved_this_session += 1
-            self.state, self.episode, self.t0 = "recording", int(g.group(1)), time.time()
+            n = int(g.group(1))
+            if self.first is None:
+                self.first = n
+            self.state, self.episode, self.t0, self.discard = "recording", n, time.time(), False
         elif m.startswith("Reset the environment"):
-            if self.state == "recording":
-                self.saved_this_session += 1
-            self.state, self.t0 = "reset", time.time()
+            self.state, self.t0 = "waiting", time.time()
         elif m.startswith("Re-record episode"):
-            self.state, self.t0 = "re-record", time.time()
+            self.state = "discarding"
         elif m.startswith("Stop recording"):
-            if self.state == "recording":
-                self.saved_this_session += 1
-            self.state, self.t0 = "stopping (arms parking)", time.time()
+            if self.episode is not None:
+                self.final = self.episode + (0 if self.discard else 1)
+            self.state, self.t0 = "stopped", time.time()
+
+    def key(self, k):
+        """A key was pressed from the page: show the transition at once (LeRobot logs it only later)."""
+        if self.state == "recording" and k in ("right", "left"):
+            self.state, self.t0 = "stopping", time.time()
+            self.discard = k == "left"
+        elif self.state == "waiting" and k == "right":
+            self.state = "discarding" if self.discard else "saving"
+        elif k == "esc":
+            self.state = "stopping session"
 
 
 PAGE = r"""<!doctype html><meta charset=utf-8><title>YAM record</title><meta name=viewport content="width=device-width,initial-scale=1">
@@ -86,8 +111,8 @@ async function post(p,b){try{const r=await (await fetch(p,{method:'POST',body:JS
 const f=v=>v==null?'-':v.map(x=>x.toFixed(2)).join(' ');
 setInterval(async()=>{try{const s=await (await fetch('/status')).json();
  mode.textContent=s.fault?'FAULT: '+s.fault:s.mode.toUpperCase();mode.className='big '+(s.fault?'fault':s.mode);blocked.textContent=s.blocked?'blocked: '+s.blocked:'';
- const e=s.episode;ep.textContent=e.state==='recording'?'● RECORDING episode '+e.episode+'  '+e.elapsed+' s':e.state.toUpperCase()+(e.state==='reset'?'  '+e.elapsed+' s':'');
- ep.className='big '+(e.state==='recording'?'recording':'');epd.textContent=`saved this session ${e.saved}   gripper target ${s.grip.toFixed(2)}`;
+ const e=s.episode;ep.textContent=e.state==='recording'?'● RECORDING episode '+e.episode+'  '+e.elapsed+' s':e.state==='waiting'?'WAITING: episode '+e.episode+(e.discard?' will be discarded':' will be saved')+' on → / Esc':e.state.toUpperCase();
+ ep.className='big '+(e.state==='recording'?'recording':'');epd.textContent=`in dataset ${e.in_dataset??'-'}   saved this session ${e.saved??0}   gripper target ${s.grip.toFixed(2)}`;
  st.textContent=`leader q    ${f(s.leader_q)}\nfollower q  ${f(s.pos)}\ncommand     ${f(s.cmd)}\neffort      ${f(s.effort)}`}catch(e){mode.textContent='page server not reachable (session ended?)';mode.className='big fault'}},250);
 </script>"""
 
@@ -126,7 +151,8 @@ class WebPage:
         lst = lambda v: None if v is None else [float(x) for x in v]
         return dict(mode=r.mode, blocked=r.blocked, fault=r.fault, grip=A.grip_target(), pos=lst(s.get("pos")),
                     effort=lst(s.get("effort")), cmd=lst(r.cmd), leader_q=lst(A.leader_q()),
-                    episode=dict(state=e.state, episode=e.episode, saved=e.saved_this_session,
+                    episode=dict(state=e.state, episode=e.episode, discard=e.discard, in_dataset=e.in_dataset,
+                                 saved=None if e.first is None or e.in_dataset is None else e.in_dataset - e.first,
                                  elapsed=None if e.t0 is None else round(time.time() - e.t0, 1)))
 
     def start(self):
@@ -174,9 +200,23 @@ class WebPage:
                 if self.path == "/grip":
                     A.set_grip_target(float(b.get("g", 1.0))); msg = f"gripper target {A.grip_target():.2f}"
                 elif self.path == "/key" and page.kb is not None and b.get("k") in page.keys:
+                    e = page.eplog
+                    allowed = {"recording": ("right", "left", "esc"), "waiting": ("right", "esc")}.get(e.state, ("esc",))
+                    if b["k"] not in allowed:
+                        msg = f"not now: the session is {e.state}"
+                        try:
+                            self._send(dict(msg=msg))
+                        except (BrokenPipeError, ConnectionResetError):
+                            pass
+                        return
                     k = page.keys[b["k"]]; page.kb.press(k); page.kb.release(k)
-                    msg = {"right": "saving the episode and moving on", "left": "re-recording this episode",
-                           "esc": "stopping the session: both arms park"}[b["k"]]
+                    e.key(b["k"])
+                    msg = {"stopping": "episode stopped: press Start next episode to save it (or End session)",
+                           "saving": "saving the episode (a few seconds), then the next one starts",
+                           "discarding": "discarded: the same episode number is recorded again",
+                           "stopping session": "ending the session: both arms park, then torque is cut"}.get(e.state, e.state)
+                    if e.state == "stopping" and e.discard:
+                        msg = "episode stopped and will be DISCARDED: press Start next episode to record it again"
                 else:
                     msg = "not available"
                 try:

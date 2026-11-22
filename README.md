@@ -104,3 +104,15 @@ PYTHONPATH=$LR_PYTHONPATH $LR_PY -m yam_teleop.to_lerobot data/episodes/right_ar
 | `yam_teleop/leader_follower.py`, `record.py`, `cam_wall.py` | The earlier web-page teleop, MCAP recorder and camera server |
 
 `--robot.mock=true --teleop.mock=true --robot.cameras="{}"` runs the whole pipeline without hardware.
+
+## Control page (recommended)
+
+```bash
+source env.sh && PYTHONPATH=$LR_PYTHONPATH $LR_PY -m yam_teleop.control      # -> http://127.0.0.1:8780
+```
+
+Always on: live camera previews while idle; **Start recording** launches `record.sh` (lerobot-record) for the dataset
+named on the page and episode 0 begins. **Stop episode** / **Stop & discard** end an episode; the session then waits
+(arms keep following) until **Start next episode** (that is when LeRobot saves the previous one, a few seconds) or
+**End session** (saves a pending episode, parks both arms, cuts torque). Gripper buttons, follower state and the session
+log are on the same page. Episodes still end on their own after 90 s. `--mock` uses simulated arms for testing.
