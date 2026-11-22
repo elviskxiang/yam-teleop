@@ -54,6 +54,14 @@ the current episode is discarded.
 Tips for good data: 50+ episodes per task to start; same task text for the same task; vary the start positions; avoid
 reaching into the right arm's camera views with your hands; keep each episode to one attempt (discard fumbles).
 
+Episode files are numbered automatically (`episode_00000.mcap`, ...); never rename them, the converter reads only
+`episode_*.mcap`. Give every demo of a task the same task text: each distinct text becomes its own task label. To fix
+a label after recording (the data is copied unchanged and checked before the original is replaced):
+
+```bash
+$REC_PY -m yam_teleop.relabel screw_from_rest data/episodes/<name>/episode_00001.mcap
+```
+
 ## Training
 
 ```bash
