@@ -6,3 +6,4 @@ outputs/
 *.mcap.part
 wandb/
 .env
+*.egg-info/

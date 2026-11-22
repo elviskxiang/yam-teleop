@@ -1,8 +1,0 @@
-pyproject.toml
-lerobot_teleoperator_yam/__init__.py
-lerobot_teleoperator_yam/config_yam_leader.py
-lerobot_teleoperator_yam/yam_leader.py
-lerobot_teleoperator_yam.egg-info/PKG-INFO
-lerobot_teleoperator_yam.egg-info/SOURCES.txt
-lerobot_teleoperator_yam.egg-info/dependency_links.txt
-lerobot_teleoperator_yam.egg-info/top_level.txt
