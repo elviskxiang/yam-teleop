@@ -5,6 +5,9 @@
 
 One dataset frame per 1/fps s, from the latest sample at or before that instant:
   observation.state           (7,)  follower joint1-6 (rad) + gripper (0 closed .. 1 open), measured
+  observation.velocity        (7,)  follower joint1-6 + gripper velocity, measured
+  observation.effort          (7,)  torque beyond the URDF gravity model on joints 1-6 (N m) + gripper motor effort: the
+                                    rig's contact-force signal (no F/T sensor; includes tracking and friction torque)
   action                      (7,)  follower command at that instant (what the policy must output)
   observation.images.<cam>    (480, 640, 3) RGB video per camera
   task                        the episode's task text
@@ -30,14 +33,24 @@ NAMES = [f"joint{i}" for i in range(1, 7)] + ["gripper"]
 
 
 def read_episode(path):
-    """-> task, {cam: (t[n], [jpeg bytes])}, follower (t, q7), action (t, a7)"""
+    """-> task, {cam: (t[n], [jpeg bytes])}, follower (t, q7), action (t, a7), dyn (t, vel7, effort7)
+
+    effort = the torque the motors apply beyond the URDF gravity model (joint_eff - grav_torque, N m) on joints 1-6,
+    plus the gripper motor's effort: the rig has no force/torque sensor, so this is its contact-force signal. It still
+    contains the PD tracking and friction torque, not only contact."""
     with open(path, "rb") as f:
         r = make_reader(f)
         meta = {m.name: m.metadata for m in r.iter_metadata()}
         task = meta.get("episode", {}).get("task", "")
         dfac, decs = DecoderFactory(), {}
-        cams, fol, act = {}, ([], []), ([], [])
+        cams, fol, act, dyn = {}, ([], []), ([], []), ([], [], [])
         for sch, ch, msg in r.iter_messages(topics=None):
+            if ch.topic == "/telemetry":
+                x = json.loads(msg.data); F = x["follower"]
+                dyn[0].append(msg.log_time)
+                dyn[1].append(F["joint_vel"] + (F.get("gripper_vel") or [0.0])[:1])
+                dyn[2].append([e - g for e, g in zip(F["joint_eff"], F["grav_torque"])] + (F.get("gripper_eff") or [0.0])[:1])
+                continue
             if ch.message_encoding != "cdr":
                 continue
             dec = decs.get(sch.id) or decs.setdefault(sch.id, dfac.decoder_for("cdr", sch))
@@ -50,7 +63,8 @@ def read_episode(path):
             elif ch.topic == "/action":
                 act[0].append(msg.log_time); act[1].append(list(m.position))
     cams = {k: (np.array(t), j) for k, (t, j) in cams.items()}
-    return task, cams, (np.array(fol[0]), np.array(fol[1], np.float32)), (np.array(act[0]), np.array(act[1], np.float32))
+    return (task, cams, (np.array(fol[0]), np.array(fol[1], np.float32)), (np.array(act[0]), np.array(act[1], np.float32)),
+            (np.array(dyn[0]), np.array(dyn[1], np.float32), np.array(dyn[2], np.float32)))
 
 
 def latest(ts, t):
@@ -77,15 +91,17 @@ def main():
     keep = [c for c in a.cams.split(",") if c]
     ds, cam_list, n_ok = None, None, 0
     for p in files:
-        task, cams, (tf, qf), (ta, qa) = read_episode(p)
+        task, cams, (tf, qf), (ta, qa), (td, vd, ed) = read_episode(p)
         if keep:
             cams = {k: v for k, v in cams.items() if k in keep}
-        if not cams or len(tf) == 0 or len(ta) == 0:
+        if not cams or len(tf) == 0 or len(ta) == 0 or len(td) == 0:
             print(f"skip {p.name}: missing streams"); continue
         if cam_list is None:
             cam_list = sorted(cams)
             h, w = cv2.imdecode(np.frombuffer(cams[cam_list[0]][1][0], np.uint8), cv2.IMREAD_COLOR).shape[:2]
             features = {"observation.state": dict(dtype="float32", shape=(7,), names=NAMES),
+                        "observation.velocity": dict(dtype="float32", shape=(7,), names=NAMES),
+                        "observation.effort": dict(dtype="float32", shape=(7,), names=NAMES),
                         "action": dict(dtype="float32", shape=(7,), names=NAMES)}
             for c in cam_list:
                 features[f"observation.images.{c}"] = dict(dtype="video", shape=(h, w, 3), names=["height", "width", "channels"])
@@ -98,10 +114,11 @@ def main():
         grid = np.arange(t0, t1, int(1e9 / a.fps))
         if (t1 - t0) / 1e9 < a.min_seconds:
             print(f"skip {p.name}: {(t1 - t0) / 1e9:.1f} s"); continue
-        i_f, i_a = latest(tf, grid), latest(ta, grid)
+        i_f, i_a, i_d = latest(tf, grid), latest(ta, grid), latest(td, grid)
         i_c = {c: latest(cams[c][0], grid) for c in cam_list}
         for k in range(len(grid)):
-            frame = {"observation.state": qf[i_f[k]], "action": qa[i_a[k]], "task": task}
+            frame = {"observation.state": qf[i_f[k]], "observation.velocity": vd[i_d[k]], "observation.effort": ed[i_d[k]],
+                     "action": qa[i_a[k]], "task": task}
             for c in cam_list:
                 bgr = cv2.imdecode(np.frombuffer(cams[c][1][i_c[c][k]], np.uint8), cv2.IMREAD_COLOR)
                 frame[f"observation.images.{c}"] = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)

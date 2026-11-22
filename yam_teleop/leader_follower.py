@@ -10,7 +10,8 @@ capped by the rig's LeashGripper (13 N), which the stock servo is not (it burst 
 
 Follower safety, every control tick (100 Hz):
   * starts FLOATING; 'Engage' ramps it at 0.35 rad/s from where it is to the leader's pose, then it follows;
-  * the target is clipped to the joint limits and slewed at most --max-vel rad/s per joint;
+  * the target is clipped to the joint limits and slewed at most --max-vel rad/s per joint, and sent with its velocity as a
+    feed-forward (--vff) so the motors' damping does not make the follower trail the leader;
   * a target that the rig model (robotics-rubiks-cube poc/generated/scene.xml) says touches the table, the floor or the leader,
     or puts the grasp point below the table top, is not sent: the follower holds and the page says why;
   * if the follower falls > 0.3 rad behind its command (it hit something) it holds where it is and stops following; an
@@ -43,6 +44,8 @@ J_HI = np.array([3.05433, 3.66519, 3.66519, 1.5708, 1.5708, 2.0944 - np.radians(
 ENGAGE_VEL, TRACK_STOP, ENGAGED_TOL = 0.35, 0.30, 0.02
 FLOOR_Z = 0.735                       # grasp point may not go below the table top (m, world)
 GRIP_VEL = 1.5                        # normalized gripper units per second
+VFF_ALPHA = 0.25                      # low-pass on the velocity feed-forward (~40 ms at 100 Hz)
+VFF_GAIN = 1.0                        # fraction of the command velocity fed forward (0 = position-only, the old behaviour)
 GRIP_PRESETS = {"open": 1.0, "cube": 0.62, "squeeze": 0.45, "close": 0.0}   # close: fully shut, still force-capped (13 N)
 
 
@@ -109,6 +112,7 @@ class Teleop:
         self.mode, self.msg, self.blocked = "idle", "follower floating: press Engage", None
         self.cmd = None                                     # follower command (7): q6 + gripper 0..1; None = floating
         self.grip_target = 1.0
+        self.vff = np.zeros(6)                              # follower joint velocity feed-forward (rad/s)
         self.ep = dict(id=1, state="idle", task=task, t_start=None, saved=0, discarded=0, last=None)
         self.snap = None
         if mock:
@@ -175,8 +179,13 @@ class Teleop:
             if hit:
                 self.blocked = hit                          # hold the joints this tick; the gripper may still move
                 q_new = self.cmd[:6]
+            # velocity feed-forward: the motors run MIT mode, tau = kp (q* - q) + kd (v* - v). With v* = 0 the damping
+            # brakes every motion and the arm trails a moving target by kd v / kp (wrist roll: 0.26 rad at 1.5 rad/s,
+            # just under the 0.3 rad stop). v* = the command's own velocity, low-passed against leader-encoder jitter.
+            v_raw = (q_new - self.cmd[:6]) / DT
+            self.vff = (1 - VFF_ALPHA) * self.vff + VFF_ALPHA * v_raw if not hit else np.zeros(6)
             self.cmd = np.r_[q_new, g_new]
-            self.arm[FOLLOWER].command_joint_pos(self.cmd)
+            self._send(self.cmd, self.vff * VFF_GAIN)
             if self.mode == "engaging" and np.abs(target - q_new).max() < ENGAGED_TOL:
                 self.mode, self.msg = "following", "following the leader"
             lag = float(np.abs(self.cmd[:6] - fq).max())
@@ -185,11 +194,29 @@ class Teleop:
                            f"(touching something?). Holding; press Engage to continue.", fq=fq, fg=fg)
         self.snap = self._snapshot(lo, lq, fo, fq)
 
+    def _send(self, cmd, vff):
+        """Follower command: joint positions (+ gripper) with a joint velocity feed-forward (gripper: 0, the force cap
+        relies on its damping)."""
+        a = self.arm[FOLLOWER]
+        if not hasattr(a, "_command_lock"):                 # mock arm
+            a.command_joint_pos(cmd)
+            return
+        # Same as the SDK's command_joint_state, but the command is built first and swapped in under the lock: the SDK
+        # resets it to all zeros (kp = kd = 0) outside the lock, so its control thread can catch a zero-stiffness tick.
+        from i2rt.robots.motor_chain_robot import JointCommands
+        c = JointCommands.init_all_zero(len(a.motor_chain))
+        c.pos = a._joint_to_motor_pos(a.remapper.to_robot_joint_pos_space(a._clip_robot_joint_pos_command(cmd)))
+        c.vel = a._joint_to_motor_vel(a.remapper.to_robot_joint_vel_space(np.r_[vff, 0.0]))
+        c.kp, c.kd = a._kp, a._kd
+        with a._command_lock:
+            a._commands = c
+
     def _hold(self, why, fq=None, fg=None):
         if fq is None:
             _, fq, fg = self._obs(FOLLOWER)
         if self.mode in ("engaging", "following") or self.cmd is not None:
             self.cmd = np.r_[fq, self.cmd[6] if self.cmd is not None else fg]
+            self.vff = np.zeros(6)
             self.arm[FOLLOWER].command_joint_pos(self.cmd)
         self.mode, self.msg = "held", why
         if self.ep["state"] == "recording":
@@ -208,7 +235,9 @@ class Teleop:
         ep = dict(self.ep)
         ep["elapsed_s"] = None if ep["t_start"] is None else round(time.time() - ep["t_start"], 1)
         return dict(t_ns=time.time_ns(), mode=self.mode, msg=self.msg, blocked=self.blocked, episode=ep,
-                    action=None if self.cmd is None else [float(v) for v in self.cmd], follower=follower, leader=leader)
+                    action=None if self.cmd is None else [float(v) for v in self.cmd],
+                    action_vel=None if self.cmd is None else [float(v) for v in self.vff * VFF_GAIN],
+                    follower=follower, leader=leader)
 
     # ---- commands from the page (each takes the lock)
     def engage(self):
@@ -217,6 +246,7 @@ class Teleop:
         _, fq, fg = self._obs(FOLLOWER)
         self.cmd = np.r_[fq, fg]                            # start exactly where it is: no jump
         self.grip_target = fg
+        self.vff = np.zeros(6)
         self.arm[FOLLOWER].command_joint_pos(self.cmd)
         self.mode, self.msg = "engaging", "engaging: follower moving slowly to the leader's pose"
         return self.msg
@@ -350,15 +380,19 @@ CAM_NAMES = ["D415 (tripod, top)", "C922", "Microdia left", "Microdia right"]
 
 
 def main():
+    global VFF_GAIN
     ap = argparse.ArgumentParser(description="right-arm teleop with the left arm as leader")
     ap.add_argument("--mock", action="store_true", help="no hardware: a self-moving leader and a simulated follower")
     ap.add_argument("--port", type=int, default=8780)
     ap.add_argument("--max-vel", type=float, default=1.5, help="follower joint speed limit while following (rad/s)")
     ap.add_argument("--grav-factor", type=float, nargs=6, default=list(GRAV_FACTOR))
     ap.add_argument("--friction", action="store_true", help="Coulomb friction feed-forward on the leader (lighter by hand)")
+    ap.add_argument("--vff", type=float, default=VFF_GAIN,
+                    help="velocity feed-forward gain 0..1 (1 = the follower keeps up with fast wrist turns; 0 = position only)")
     ap.add_argument("--task", default="", help="default task description for episodes")
     ap.add_argument("--scene", default=os.path.join(os.environ.get("RUBIKS", ""), "poc", "generated", "scene.xml"))
     a = ap.parse_args()
+    VFF_GAIN = float(np.clip(a.vff, 0.0, 1.0))
     if not os.path.isfile(a.scene):
         raise SystemExit(f"rig scene not found: {a.scene} (source env.sh, or pass --scene); it is needed for collision checks")
     tele = Teleop(a.mock, a.scene, a.grav_factor, a.max_vel, task=a.task, friction=a.friction)
@@ -383,7 +417,7 @@ def main():
                 elif self.path == "/cams":
                     self._send(CAM_NAMES)
                 elif self.path == "/config":
-                    self._send(dict(leader=LEADER, follower=FOLLOWER, kp=KP.tolist(), kd=KD.tolist(), max_vel=tele.max_vel,
+                    self._send(dict(leader=LEADER, follower=FOLLOWER, kp=KP.tolist(), kd=KD.tolist(), max_vel=tele.max_vel, vff_gain=VFF_GAIN,
                                     grav_factor=tele.grav_factor.tolist(), gravity_model=tele.gmodel.path,
                                     link_specs=tele.gmodel.specs(), j_lo=J_LO.tolist(), j_hi=J_HI.tolist(), mock=tele.mock))
                 elif self.path.startswith("/telemetry/stream"):
@@ -421,7 +455,7 @@ def main():
             pass
 
     print(f"YAM teleop on http://127.0.0.1:{a.port}  ({'MOCK' if a.mock else 'REAL arms'}; leader={LEADER}, follower={FOLLOWER}; "
-          f"URDF gravity x {tele.grav_factor.tolist()})", flush=True)
+          f"URDF gravity x {tele.grav_factor.tolist()}; velocity feed-forward x {VFF_GAIN})", flush=True)
     ThreadingHTTPServer(("127.0.0.1", a.port), H).serve_forever()
 
 

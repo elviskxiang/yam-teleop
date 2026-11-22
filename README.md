@@ -46,7 +46,8 @@ Then open http://127.0.0.1:8780:
 5. **Float** (`Q`) to let go of the right arm; **Park and release** at the end of the session.
 
 What the follower does to stay safe, every 10 ms: targets clipped to the joint limits and slewed at ≤ 1.5 rad/s
-(`--max-vel`); a target that the rig model says hits the table, the floor or the leader, or puts the grasp point below
+(`--max-vel`), sent with a velocity feed-forward (`--vff`, default 1) so the motors' damping does not make it trail the
+leader (without it the wrist roll ran 0.26 rad behind during screwing, just under the stop); a target that the rig model says hits the table, the floor or the leader, or puts the grasp point below
 the table top, is not sent (the page shows *blocked: …*); if it falls 0.3 rad behind its command it stops, holds, and
 the current episode is discarded.
 
@@ -63,8 +64,13 @@ conda run --no-capture-output -n $LEROBOT_ENV python -m yam_teleop.to_lerobot da
 ./train.sh pick_cube diffusion       # or any LeRobot policy type; extra args go to lerobot-train
 ```
 
-Dataset features: `observation.state` (follower joint 1-6 + gripper), `action` (follower command), one
-`observation.images.<camera>` video per camera (640×480 @ 30 fps), `task`. `--cams c922,microdia_right_base_plate` keeps
+Dataset features: `observation.state` (follower joint 1-6 + gripper), `observation.velocity`, `observation.effort`,
+`action` (follower command), one `observation.images.<camera>` video per camera (640×480 @ 30 fps), `task`.
+
+`observation.effort` is the rig's force signal: there is no force/torque sensor, so it is the motor torque beyond the URDF
+gravity model on joints 1-6 (N m) plus the gripper motor's effort. It also contains tracking and friction torque. On the
+first screw demo the gripper effort separated holding from open clearly (0.43 vs 0.11); the wrist roll's contact torque
+was weak (0.23 vs 0.15 N m holding-and-turning vs holding-still, noise 0.09). `--cams c922,microdia_right_base_plate` keeps
 only some cameras.
 
 ## Files

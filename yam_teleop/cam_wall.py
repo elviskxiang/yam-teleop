@@ -46,6 +46,24 @@ CAMS = [
     ("Microdia right (base plate)", [BY_PATH + "10:1.0-video-index0"]),
 ]
 
+# V4L2 controls applied every time a camera opens (they reset on replug). The C922's auto-exposure defaults to
+# exposure_auto_priority = 1, which lets it halve its frame rate to 15 fps in dim light (a whole demo episode was
+# recorded at 15 fps that way); 0 keeps auto-exposure but holds 30 fps, making up with gain.
+V4L2_CID_EXPOSURE_AUTO_PRIORITY = 0x009A0903
+CONTROLS = {"C922": {V4L2_CID_EXPOSURE_AUTO_PRIORITY: 0}}
+
+
+def set_v4l2_ctrl(dev, cid, value):
+    import fcntl, struct
+    VIDIOC_S_CTRL, VIDIOC_G_CTRL = 0xC008561C, 0xC008561B
+    fd = os.open(dev, os.O_RDWR)
+    try:
+        fcntl.ioctl(fd, VIDIOC_S_CTRL, bytearray(struct.pack("Ii", cid, value)))
+        b = bytearray(struct.pack("Ii", cid, 0)); fcntl.ioctl(fd, VIDIOC_G_CTRL, b)
+        return struct.unpack("Ii", b)[1]
+    finally:
+        os.close(fd)
+
 
 class Cam(threading.Thread):
     def __init__(self, name, candidates):
@@ -62,6 +80,13 @@ class Cam(threading.Thread):
             cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            for cid, value in CONTROLS.get(self.name_, {}).items():
+                try:
+                    got = set_v4l2_ctrl(dev, cid, value)
+                    if got != value:
+                        print(f"{self.name_}: control {cid:#x} is {got}, wanted {value}", flush=True)
+                except OSError as e:
+                    print(f"{self.name_}: could not set control {cid:#x}: {e}", flush=True)
             ok, frame = cap.read()
             if ok and frame is not None and frame.ndim == 3:
                 self.dev = dev
