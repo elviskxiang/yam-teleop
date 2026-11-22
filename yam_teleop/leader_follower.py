@@ -113,30 +113,59 @@ class Teleop:
         self.cmd = None                                     # follower command (7): q6 + gripper 0..1; None = floating
         self.grip_target = 1.0
         self.vff = np.zeros(6)                              # follower joint velocity feed-forward (rad/s)
+        self.fault = None                                   # set once an arm's control loop dies; cleared only by a restart
         self.ep = dict(id=1, state="idle", task=task, t_start=None, saved=0, discarded=0, last=None)
         self.snap = None
         if mock:
             import yam_io as Y
             self.arm = {LEADER: MockLeader(), FOLLOWER: Y.MockArm(np.r_[0.0, 0.9, 0.9, 0, 0, 0, 1.0])}
         else:
-            import yam_io as Y
-            from i2rt.robots.get_robot import get_yam_robot
-            from i2rt.robots.utils import ArmType, GripperType
-            self.arm = {}
-            for s in (LEADER, FOLLOWER):
-                r = get_yam_robot(channel=f"can_{s}", arm_type=ArmType.YAM, gripper_type=GripperType.LINEAR_4310, zero_gravity_mode=True,
-                                  gravity_comp_factor=self.grav_factor, enable_auto_recovery=True, gripper_kp=None, gripper_kd=0.1)
-                r.kdl = UrdfGravity()                       # gravity from the URDF instead of the SDK's MJCF
-                r.temp_record_flag = True
-                r.use_coulomb_friction = bool(friction) and s == LEADER
-                if s == FOLLOWER:
-                    r._gripper_force_limiter = Y.LeashGripper(r, grip_N, Y.GripperMap(), 0.031); r._limit_gripper_force = grip_N
-                    r.update_kp_kd(np.r_[KP, r._kp[6]], np.r_[KD, r._kd[6]])   # stored; applied with the first command
-                self.arm[s] = r
+            self.friction, self.grip_N = bool(friction), grip_N
+            self.arm = {s: self._make_arm(s) for s in (LEADER, FOLLOWER)}
         self.released = False
         self._stop = threading.Event()
         self.thread = threading.Thread(target=self._loop, daemon=True)
         self.thread.start()
+
+    def _make_arm(self, s):
+        """Connect to one arm on its CAN bus: the SDK checks every motor, calibrates the gripper (it opens and closes),
+        and starts the arm floating under gravity compensation."""
+        import yam_io as Y
+        from i2rt.robots.get_robot import get_yam_robot
+        from i2rt.robots.utils import ArmType, GripperType
+        r = get_yam_robot(channel=f"can_{s}", arm_type=ArmType.YAM, gripper_type=GripperType.LINEAR_4310, zero_gravity_mode=True,
+                          gravity_comp_factor=self.grav_factor, enable_auto_recovery=True, gripper_kp=None, gripper_kd=0.1)
+        r.kdl = UrdfGravity()                               # gravity from the URDF instead of the SDK's MJCF
+        r.temp_record_flag = True
+        r.use_coulomb_friction = self.friction and s == LEADER
+        if s == FOLLOWER:
+            r._gripper_force_limiter = Y.LeashGripper(r, self.grip_N, Y.GripperMap(), 0.031); r._limit_gripper_force = self.grip_N
+            r.update_kp_kd(np.r_[KP, r._kp[6]], np.r_[KD, r._kd[6]])   # stored; applied with the first command
+        return r
+
+    def reconnect(self):
+        """Re-open the motor chain of every arm whose control loop died; the follower is left floating afterwards."""
+        dead = self._dead_arms()
+        if not dead:
+            return "no arm needs reconnecting"
+        for s in dead:                                      # a held follower keeps holding meanwhile (the SDK repeats its command)
+            try:
+                self.arm[s].close()                         # release the dead chain's CAN socket
+            except Exception:
+                pass
+            try:
+                self.arm[s] = self._make_arm(s)
+            except Exception as e:
+                return f"reconnecting the {s} arm failed: {type(e).__name__}: {e}. Check its power and cables."
+        self.fault = None
+        if FOLLOWER in dead or self.cmd is None:
+            self.cmd, self.mode = None, "idle"
+        else:
+            self.mode = "held"                              # still stiff at its last command
+        self.msg = f"reconnected the {' and '.join(dead)} arm; " + ("follower holding: press Engage to continue"
+                                                                   if self.mode == "held" else "press Engage to continue")
+        print(self.msg, flush=True)
+        return self.msg
 
     # ---- control loop
     def _obs(self, s):
@@ -165,10 +194,26 @@ class Teleop:
             if time.time() - nxt > 0.1:
                 nxt = time.time()
 
+    def _dead_arms(self):
+        """Arms whose SDK control loop has stopped (e.g. a motor stopped answering on CAN). Their observations then stay
+        frozen at the last value, which would look like an arm that is simply not moving."""
+        return [s for s in (LEADER, FOLLOWER) if hasattr(self.arm[s], "motor_chain") and not self.arm[s].motor_chain.running]
+
     def _tick(self):
         lo, lq, lg = self._obs(LEADER)
         fo, fq, fg = self._obs(FOLLOWER)
         self.blocked = None
+        dead = self._dead_arms()
+        if dead:
+            if self.fault is None:
+                self.fault = (f"FAULT: the {' and '.join(dead)} arm stopped responding (a motor dropped off CAN); its readings "
+                              f"are frozen. Check its cables and power, then press Reconnect arm.")
+                if FOLLOWER not in dead and self.mode in ("engaging", "following"):
+                    self._hold(self.fault, fq=fq, fg=fg)    # stays stiff where it is (it may be holding something)
+                print(self.fault, flush=True)
+            self.mode, self.msg = "fault", self.fault
+            self.snap = self._snapshot(lo, lq, fo, fq)
+            return
         if self.mode in ("engaging", "following"):
             target = np.clip(lq, J_LO, J_HI)
             vel = ENGAGE_VEL if self.mode == "engaging" else self.max_vel
@@ -241,6 +286,8 @@ class Teleop:
 
     # ---- commands from the page (each takes the lock)
     def engage(self):
+        if self.fault:
+            return self.fault
         if self.mode in ("engaging", "following"):
             return "already engaged"
         _, fq, fg = self._obs(FOLLOWER)
@@ -290,11 +337,12 @@ class Teleop:
 
     def park(self, release):
         if self.ep["state"] == "recording":
-            self._end_episode("saved")
-        q0 = {s: np.r_[self._obs(s)[1], self._obs(s)[2]] for s in (LEADER, FOLLOWER)}
-        if self.mode in ("engaging", "following", "held") and self.cmd is not None:
+            self._end_episode("saved" if not self.fault else "discarded")
+        dead = self._dead_arms()                            # an arm whose loop died cannot be moved: park the others
+        q0 = {s: np.r_[self._obs(s)[1], self._obs(s)[2]] for s in (LEADER, FOLLOWER) if s not in dead}
+        if FOLLOWER in q0 and self.mode in ("engaging", "following", "held", "fault") and self.cmd is not None:
             q0[FOLLOWER] = self.cmd.copy()
-        seconds = max(5.0, max(float(np.abs(q0[s][:6]).max()) for s in q0) / 0.3)
+        seconds = max(5.0, max([float(np.abs(q0[s][:6]).max()) for s in q0] + [0.0]) / 0.3)
         n = int(seconds * 100)
         for i in range(1, n + 1):
             u = i / n; u = u * u * (3 - 2 * u)
@@ -307,9 +355,12 @@ class Teleop:
             self.arm[s].enter_gravity_comp_idle()
         self.cmd, self.mode = None, "idle"
         if release:
-            for s in q0:
+            for s in (LEADER, FOLLOWER):                    # dead arms too: frees their CAN sockets
                 if hasattr(self.arm[s], "close"):
-                    self.arm[s].close()
+                    try:
+                        self.arm[s].close()
+                    except Exception as e:
+                        print(f"closing the {s} arm: {type(e).__name__}: {e}", flush=True)
             self.released, self.mode = True, "released"
             self.msg = "parked and released: torque is off. Restart the program to continue."
         else:
@@ -349,7 +400,7 @@ kbd{background:#2a2f36;border-radius:3px;padding:0 4px;font:11px ui-monospace,mo
 <div class=panel>
  <div class=box><h2>Follower (right arm)</h2><div id=mode>…</div>
   <div class=row style="margin-top:6px"><button class=go onclick="post('/engage')">Engage <kbd>E</kbd></button><button onclick="post('/disengage')">Float <kbd>Q</kbd></button></div>
-  <div id=blocked class=bad></div></div>
+  <div id=blocked class=bad></div><div class=row id=rc style="display:none;margin-top:6px"><button class=warn onclick="post('/reconnect')">Reconnect arm</button></div></div>
  <div class=box><h2>Episode</h2>
   <input type=text id=task placeholder="task, e.g. pick up the cube and place it on the tape">
   <div class=row style="margin-top:6px"><button id=recbtn class=rec onclick="toggleRec()">Start <kbd>space</kbd></button><button onclick="post('/episode/discard')">Discard <kbd>X</kbd></button></div>
@@ -367,7 +418,7 @@ async function post(p,b){try{const r=await (await fetch(p,{method:'POST',body:JS
 function toggleRec(){if(S&&S.episode.state==='recording')post('/episode/stop');else post('/episode/start',{task:task.value})}
 const f=v=>v==null?'-':v.map(x=>x.toFixed(2)).join(' ');
 function show(s){S=s;const rec=s.episode.state==='recording';mode.textContent=rec?'● RECORDING episode '+s.episode.id+'  '+s.episode.elapsed_s+' s':s.mode.toUpperCase();
- mode.className=rec?'recording':s.mode;recbtn.textContent=rec?'Stop and save (space)':'Start (space)';blocked.textContent=s.blocked?'blocked: '+s.blocked:'';
+ mode.className=rec?'recording':s.mode;rc.style.display=s.mode==='fault'?'flex':'none';recbtn.textContent=rec?'Stop and save (space)':'Start (space)';blocked.textContent=s.blocked?'blocked: '+s.blocked:'';
  if(document.activeElement!==task&&!task.value&&s.episode.task)task.value=s.episode.task;
  ep.textContent=`next id ${s.episode.id}   saved ${s.episode.saved}   discarded ${s.episode.discarded}\ntask: ${s.episode.task||'-'}`;
  const F=s.follower,L=s.leader;st.textContent=`${s.msg}\n\nleader q   ${f(L.joint_pos)}\nfollower q ${f(F.joint_pos)}  grip ${f(F.gripper_pos)}\naction     ${f(s.action)}\nfollower eff  ${f(F.joint_eff)}\nfollower grav ${f(F.grav_torque)}\ntemps (rotor) ${F.temp_rotor?F.temp_rotor.join(' '):'-'}`}
@@ -443,7 +494,8 @@ def main():
             b = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
             routes = {"/engage": (tele.engage,), "/disengage": (tele.disengage,), "/grip": (tele.grip, b.get("g", 1.0)),
                       "/episode/start": (tele.start_episode, b.get("task")), "/episode/stop": (tele.stop_episode, "saved"),
-                      "/episode/discard": (tele.stop_episode, "discarded"), "/park": (tele.park, False), "/release": (tele.park, True)}
+                      "/episode/discard": (tele.stop_episode, "discarded"), "/park": (tele.park, False), "/release": (tele.park, True),
+                      "/reconnect": (tele.reconnect,)}
             r = routes.get(self.path)
             msg = tele.do(*r) if r else "unknown command"
             try:
