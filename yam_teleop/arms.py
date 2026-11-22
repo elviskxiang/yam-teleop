@@ -70,8 +70,12 @@ def open_arm(side, follower, grav_factor=GRAV_FACTOR, friction=False, grip_N=13.
 
 
 def chain_dead(arm):
-    """The SDK stopped this arm's control loop (a motor stopped answering on CAN): its readings are frozen."""
-    return hasattr(arm, "motor_chain") and not arm.motor_chain.running
+    """The SDK stopped this arm's control loop (a motor stopped answering on CAN, or its server thread raised): its
+    readings are frozen and nothing reaches the motors."""
+    if not hasattr(arm, "motor_chain"):
+        return False
+    t = getattr(arm, "_server_thread", None)
+    return not arm.motor_chain.running or (t is not None and not t.is_alive())
 
 
 def park(arm, q_from, seconds_min=5.0, speed=0.3):

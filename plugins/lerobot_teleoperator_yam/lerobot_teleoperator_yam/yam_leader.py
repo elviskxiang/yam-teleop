@@ -74,7 +74,7 @@ class YamLeader(Teleoperator):
 
     def get_action(self) -> dict[str, float]:
         if A.chain_dead(self.arm):
-            raise RuntimeError(f"{self}: the leader (left) arm stopped responding (a motor dropped off CAN)")
+            raise RuntimeError(f"{self}: the leader (left) arm stopped responding (a motor dropped off CAN, or the SDK control loop crashed; see the log)")
         q = np.asarray(self.arm.get_observations()["joint_pos"], float)
         A.publish_leader(q)
         self.last_q = q

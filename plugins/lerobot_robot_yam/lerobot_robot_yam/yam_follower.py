@@ -165,7 +165,7 @@ class YamFollower(Robot):
 
     def _tick(self):
         if A.chain_dead(self.arm):
-            self.fault = self.fault or "the follower (right) arm stopped responding (a motor dropped off CAN)"
+            self.fault = self.fault or "the follower (right) arm stopped responding (a motor dropped off CAN, or the SDK control loop crashed; see the log)"
             return
         o = self.arm.get_observations()
         q = np.asarray(o["joint_pos"], float); g = float(np.ravel(o["gripper_pos"])[0])

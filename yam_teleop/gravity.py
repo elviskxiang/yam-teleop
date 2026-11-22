@@ -32,6 +32,10 @@ class UrdfGravity:
                     link.remove(e)
         root.insert(0, ET.fromstring('<mujoco><compiler fusestatic="false" discardvisual="true"/></mujoco>'))
         self.model = mujoco.MjModel.from_xml_string(ET.tostring(root, encoding="unicode"))
+        # gravity only: the URDF's joint limits would otherwise add MuJoCo's limit-constraint force to mj_inverse. An arm
+        # resting on its stop reads a hair past it (joint 2 at -0.009 rad gave -30 N m instead of +1.8), the SDK's 25 N m
+        # guard then raised in its server thread, and that arm went limp with frozen readings
+        self.model.opt.disableflags |= mujoco.mjtDisableBit.mjDSBL_CONSTRAINT
         self.data = mujoco.MjData(self.model)
         self.qadr = np.array([self.model.joint(n).qposadr[0] for n in ARM_JOINTS])
         self.vadr = np.array([self.model.joint(n).dofadr[0] for n in ARM_JOINTS])
