@@ -8,7 +8,9 @@ Window: n_ctx steps of history (observations up to and including "now", actions 
 modality together (it also predicts future proprio / force / vision: a dynamics model).
 
 Held-out evaluation (EMA weights, every --eval-every steps; outputs/mdf/<run>/log.jsonl):
-  act_rmse        RMSE (rad) of joints 1-6 over the next n_exec actions, history clean
+  act_rmse        RMSE (rad) of joints 1-6 over the next n_exec actions, history clean, sampled with --sample-schedule
+  act_rmse_<other> the same with the other schedule (full: all future tokens denoised together; pyramid: Diffusion
+                  Forcing's schedule, each further step lagging --uncertainty sampling steps, so the near future is clean first)
   hold_rmse       the same for "repeat the last action": a model worth having beats it
   grip_mae        gripper target error (0..1)
   noisy_s<σ>_unaware / _aware  act_rmse with Gaussian noise σ (in standardised units) added to the observed history,
@@ -37,7 +39,8 @@ def eval_windows(seq, L, stride):
 
 
 @torch.no_grad()
-def evaluate(model, val, norm, n_ctx, n_exec, L, device, steps=10, sigmas=(0.25, 0.5, 1.0), stride=5, max_windows=400):
+def evaluate(model, val, norm, n_ctx, n_exec, L, device, steps=10, sigmas=(0.25, 0.5, 1.0), stride=5, max_windows=400,
+             schedule="full", uncertainty=1.0):
     model.eval()
     M = len(model.mods); c = n_ctx - 1
     batch = {m: [] for m in MODALITIES}
@@ -58,13 +61,15 @@ def evaluate(model, val, norm, n_ctx, n_exec, L, device, steps=10, sigmas=(0.25,
             lvl[:, :c + 1, i] = 0                                     # observations up to now known
     gt = norm.unnorm("action", x0["action"][:, c:c + n_exec].cpu().numpy())
 
-    def act_err(known, level):
-        out = model.sample(known, level, steps=steps)
+    def act_err(known, level, sched=schedule):
+        out = model.sample(known, level, steps=steps, schedule=sched, uncertainty=uncertainty)
         pred = norm.unnorm("action", out["action"][:, c:c + n_exec].float().cpu().numpy())
         return float(np.sqrt(((pred[..., :6] - gt[..., :6]) ** 2).mean())), float(np.abs(pred[..., 6] - gt[..., 6]).mean())
 
     res = {}
     res["act_rmse"], res["grip_mae"] = act_err(x0, lvl)
+    other = "pyramid" if schedule == "full" else "full"
+    res[f"act_rmse_{other}"] = act_err(x0, lvl, other)[0]                  # the other sampling schedule, for comparison
     hold = norm.unnorm("action", x0["action"][:, c - 1:c].cpu().numpy()).repeat(n_exec, 1)
     res["hold_rmse"] = float(np.sqrt(((hold[..., :6] - gt[..., :6]) ** 2).mean()))
     ab = model.alpha_bar
@@ -103,6 +108,9 @@ def main():
     ap.add_argument("--ema", type=float, default=0.999)
     ap.add_argument("--eval-every", type=int, default=1000); ap.add_argument("--log-every", type=int, default=100)
     ap.add_argument("--sample-steps", type=int, default=10)
+    ap.add_argument("--sample-schedule", choices=("full", "pyramid"), default="full",
+                    help="held-out evaluation: denoise the future all together, or as a Diffusion Forcing pyramid (near first)")
+    ap.add_argument("--uncertainty", type=float, default=1.0, help="pyramid: sampling steps each further time step lags")
     ap.add_argument("--no-causal", action="store_true", help="bidirectional attention over the window")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
@@ -154,7 +162,8 @@ def main():
             acc = {}
             if step % a.eval_every == 0 or step == a.steps:
                 if va_s:
-                    rec.update(evaluate(ema, va_s, norm, a.n_ctx, a.n_exec, L, device, a.sample_steps))
+                    rec.update(evaluate(ema, va_s, norm, a.n_ctx, a.n_exec, L, device, a.sample_steps,
+                                        schedule=a.sample_schedule, uncertainty=a.uncertainty))
                 ck = dict(model=ema.state_dict(), cfg=cfg, norm=norm.state_dict(), step=step)
                 torch.save(ck, out / "ckpt_last.pt")
                 if va_s and rec["act_rmse"] < best:

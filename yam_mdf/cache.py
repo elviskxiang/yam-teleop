@@ -6,9 +6,16 @@ Per episode, every (30 / hz)-th frame: observation.state (21: pos, vel, effort f
 for each camera a 512-d feature from a frozen ImageNet ResNet18 (images resized to 240x320). Written to
 data/mdf_cache/<dataset>/ep_NNNN.npz; an episode already cached with the same length and settings is skipped, so after
 recording more episodes only the new ones are encoded.
+
+Safe to run while lerobot-record is still adding to the dataset: LeRobot keeps the newest data parquet open (its footer is
+written only when the file is closed) and buffers the newest episodes' metadata, so the dataset is read through a view
+(data/mdf_cache/<dataset>/_view, symlinks) holding only the finished files, and only the episodes fully in them are cached.
+The rest are picked up by the next run, after the session ends.
 """
 import argparse
 import json
+import os
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -35,20 +42,62 @@ class Encoder(torch.nn.Module):
         return self.m((x - self.mean) / self.std)
 
 
+def _readable_parquet(f):
+    import pyarrow.parquet as pq
+    try:
+        pq.read_metadata(f)
+        return True
+    except Exception:
+        return False
+
+
+def finished_view(root, view):
+    """A read-only view of a LeRobot dataset with only its finished files (see the module doc): symlinks under `view`.
+    Returns (view, episodes fully on disk, episodes left out)."""
+    from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
+    if view.exists():
+        shutil.rmtree(view)
+    (view / "meta").mkdir(parents=True)
+    if not (root / "meta" / "info.json").is_file():
+        raise SystemExit(f"{root} is not a LeRobot dataset (no meta/info.json)")
+    files = []
+    for top in ("meta", "data", "videos"):
+        for d, _, names in os.walk(root / top, followlinks=True):
+            files += [Path(d) / n for n in names]
+    for f in sorted(files):
+        rel = f.relative_to(root)
+        if f.suffix == ".parquet" and not _readable_parquet(f):
+            continue                                        # still being written
+        (view / rel).parent.mkdir(parents=True, exist_ok=True)
+        (view / rel).symlink_to(f.resolve())
+    meta = LeRobotDatasetMetadata("local/view", root=view)
+    listed = [int(i) for i in meta.episodes["episode_index"]]
+    ok, left = [], [i for i in range(meta.total_episodes) if i not in set(listed)]
+    for e in listed:
+        files = [meta.get_data_file_path(e)] + [meta.get_video_file_path(e, k) for k in meta.video_keys]
+        (ok if all((view / p).exists() for p in files) else left).append(e)
+    return view, ok, sorted(left)
+
+
 def build(dataset, hz=10, batch=32, workers=8, device="cuda"):
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
     root = ROOT / "data" / "lerobot" / dataset
-    ds = LeRobotDataset(f"local/{dataset}", root=root)
-    stride = int(round(ds.fps / hz))
-    cams = sorted(k for k in ds.meta.features if k.startswith("observation.images."))
     out = ROOT / "data" / "mdf_cache" / dataset
     out.mkdir(parents=True, exist_ok=True)
+    view, ready, left = finished_view(root, out / "_view")
+    if left:
+        print(f"episodes {left} are still being recorded or written (their files are open): not cached this time", flush=True)
+    if not ready:
+        raise SystemExit(f"no finished episodes in {root} yet")
+    ds = LeRobotDataset(f"local/{dataset}", root=view, episodes=ready)
+    stride = int(round(ds.fps / hz))
+    cams = sorted(k for k in ds.meta.features if k.startswith("observation.images."))
     meta = dict(dataset=dataset, fps=ds.fps, hz=ds.fps / stride, stride=stride, encoder=ENCODER, cameras=[c.split(".")[-1] for c in cams],
                 state_names=ds.meta.features["observation.state"]["names"], action_names=ds.meta.features["action"]["names"])
     (out / "meta.json").write_text(json.dumps(meta, indent=1))
     enc = None
-    eps = ds.meta.episodes
-    for e in range(ds.meta.total_episodes):
+    eps = {int(r["episode_index"]): r for r in ds.meta.episodes}
+    for e in ready:
         rec = eps[e]
         lo, hi, n = int(rec["dataset_from_index"]), int(rec["dataset_to_index"]), int(rec["length"])
         f = out / f"ep_{e:04d}.npz"
@@ -56,7 +105,7 @@ def build(dataset, hz=10, batch=32, workers=8, device="cuda"):
             z = np.load(f, allow_pickle=False)
             if int(z["length"]) == n and int(z["stride"]) == stride and str(z["encoder"]) == ENCODER and list(z["cameras"]) == meta["cameras"]:
                 continue
-        idx = list(range(lo, hi, stride))
+        idx = [ds.reader._absolute_to_relative_idx[i] for i in range(lo, hi, stride)]   # rows of the episode subset
         if enc is None:
             enc = Encoder().to(device)
         loader = torch.utils.data.DataLoader(torch.utils.data.Subset(ds, idx), batch_size=batch, num_workers=workers, shuffle=False)
@@ -68,7 +117,7 @@ def build(dataset, hz=10, batch=32, workers=8, device="cuda"):
                  vis=np.concatenate(V).astype(np.float16), frame_index=np.concatenate(FI), length=n, stride=stride,
                  encoder=ENCODER, cameras=np.array(meta["cameras"]), task=str(rec["tasks"][0]) if len(rec["tasks"]) else "")
         print(f"episode {e}: {len(idx)} steps at {meta['hz']:.0f} Hz cached", flush=True)
-    print(json.dumps(dict(cache=str(out), episodes=ds.meta.total_episodes, **{k: meta[k] for k in ("hz", "cameras")})))
+    print(json.dumps(dict(cache=str(out), episodes=len(ready), not_yet=left, **{k: meta[k] for k in ("hz", "cameras")})))
     return out
 
 

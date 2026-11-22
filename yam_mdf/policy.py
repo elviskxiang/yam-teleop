@@ -22,7 +22,7 @@ from yam_mdf.model import MDF
 
 
 class MDFPolicy:
-    def __init__(self, ckpt, device="cuda", sample_steps=10):
+    def __init__(self, ckpt, device="cuda", sample_steps=10, schedule=None, uncertainty=None):
         ck = torch.load(ckpt, map_location=device, weights_only=False)
         self.cfg = c = ck["cfg"]
         self.norm = Normalizer.from_state_dict(ck["norm"])
@@ -31,6 +31,8 @@ class MDFPolicy:
         self.enc = Encoder().to(device)
         self.cams = c["meta"]["cameras"]
         self.device, self.steps = device, sample_steps
+        self.schedule = schedule or c.get("sample_schedule", "full")     # full | pyramid (see MDF.sample)
+        self.uncertainty = uncertainty if uncertainty is not None else c.get("uncertainty", 1.0)
         self.n_ctx, self.n_exec, self.L = c["n_ctx"], c["n_exec"], c["L"]
 
     @torch.no_grad()
@@ -54,6 +56,6 @@ class MDFPolicy:
                 known[m][0, : n - 1] = x[: n - 1]; lvl[0, : n - 1, i] = 0
             else:
                 known[m][0, :n] = x * (self.model.alpha_bar[k].sqrt() if k else 1.0); lvl[0, :n, i] = k
-        out = self.model.sample(known, lvl, steps=self.steps)
+        out = self.model.sample(known, lvl, steps=self.steps, schedule=self.schedule, uncertainty=self.uncertainty)
         a = out["action"][0, n - 1 : n - 1 + self.n_exec].float().cpu().numpy()
         return self.norm.unnorm("action", a)

@@ -80,22 +80,47 @@ class MDF(nn.Module):
         total = sum(w.get(m, 1.0) * per[m] for m in self.mods) / sum(w.get(m, 1.0) for m in self.mods)
         return total, per
 
+    @staticmethod
+    def schedule(unknown, steps, kind="full", uncertainty=1.0):
+        """Noise levels of the unknown tokens over the sampling loop, in sampling steps (steps = pure noise, 0 = clean):
+        (rows, B, L, M), row r -> r + 1 is one denoising pass.
+          full     every unknown token goes steps -> 0 together
+          pyramid  (Diffusion Forcing) a token d time steps after the first unknown one lags it by uncertainty * d sampling
+                   steps, so the near future is clean first and the far future is denoised conditioned on it; with causal
+                   attention this is what makes the rollout step by step. steps + (H - 1) * uncertainty + 1 rows."""
+        B, L, M = unknown.shape
+        any_t = unknown.any(-1)                                                  # (B, L)
+        t0 = torch.where(any_t.any(-1), any_t.float().argmax(-1), torch.zeros(B, device=unknown.device)).long()
+        d = (torch.arange(L, device=unknown.device)[None] - t0[:, None]).clamp(min=0)    # (B, L) steps after the first unknown
+        lag = (d.float() * uncertainty).long()[..., None].expand(B, L, M) if kind == "pyramid" else torch.zeros_like(unknown, dtype=torch.long)
+        if kind not in ("full", "pyramid"):
+            raise ValueError(f"unknown schedule {kind!r}")
+        rows = steps + int(lag[unknown].max()) + 1 if unknown.any() else 1
+        m = torch.arange(rows, device=unknown.device)[:, None, None, None]
+        return (steps + lag[None] - m).clamp(0, steps)
+
     @torch.no_grad()
-    def sample(self, known, known_level, steps=20):
-        """Denoise every unknown token jointly from level K to 0 (DDIM, deterministic).
+    def sample(self, known, known_level, steps=20, schedule="full", uncertainty=1.0):
+        """Denoise the unknown tokens from level K to 0 (DDIM, deterministic), all together (schedule="full") or as a
+        Diffusion Forcing pyramid (schedule="pyramid", see MDF.schedule).
         known: {m: (B, L, d_m)} values (anything where unknown); known_level: (B, L, M) long, -1 = unknown token,
         0 = clean observation, k > 0 = an observation already noisy at level k (MDF's noise-aware conditioning;
         its value must be given as sqrt(alpha_bar_k) * x0 + sqrt(1 - alpha_bar_k) * noise)."""
         unknown = known_level < 0                                                # (B, L, M)
         x = {m: torch.where(unknown[..., i, None], torch.randn_like(known[m]), known[m]) for i, m in enumerate(self.mods)}
-        levels = torch.linspace(self.K, 0, steps + 1, device=unknown.device).round().long()
-        x0 = None
-        for a, b in zip(levels[:-1], levels[1:]):
-            k = torch.where(unknown, a, known_level.clamp(min=0))
-            x0 = self(x, k)
+        sched = self.schedule(unknown, steps, schedule, uncertainty)
+        real = torch.linspace(0, self.K, steps + 1, device=unknown.device).round().long()   # sampling step -> level
+        cond = known_level.clamp(min=0)
+        for r in range(sched.shape[0] - 1):
+            a, b = real[sched[r]], real[sched[r + 1]]                            # (B, L, M) this pass: level a -> b
+            if not (unknown & (a != b)).any():
+                continue
+            x0 = self(x, torch.where(unknown, a, cond))
             ab_a, ab_b = self.alpha_bar[a], self.alpha_bar[b]
+            move = unknown & (a != b)                                            # tokens at their final level stay
             for i, m in enumerate(self.mods):
-                eps = (x[m] - ab_a.sqrt() * x0[m]) / (1 - ab_a).clamp(min=1e-8).sqrt()
-                nxt = ab_b.sqrt() * x0[m] + (1 - ab_b).sqrt() * eps
-                x[m] = torch.where(unknown[..., i, None], nxt, x[m])
-        return {m: torch.where(unknown[..., i, None], x0[m], known[m]) for i, m in enumerate(self.mods)}
+                aa, bb = ab_a[..., i, None], ab_b[..., i, None]
+                eps = (x[m] - aa.sqrt() * x0[m]) / (1 - aa).clamp(min=1e-8).sqrt()
+                nxt = bb.sqrt() * x0[m] + (1 - bb).sqrt() * eps
+                x[m] = torch.where(move[..., i, None], nxt, x[m])
+        return x                                                                 # unknown tokens end at level 0 (= their x0)

@@ -10,9 +10,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source env.sh
 ds="${1:-screw_from_rest}"; mode="${2:-both}"; shift || true; shift || true
-export PYTHONPATH="$LR_PYTHONPATH"
+export PYTHONPATH="$LR_PYTHONPATH" HF_HUB_OFFLINE=1   # local datasets only: never reach for the Hub
 busy=$(pgrep -af "record_session|lerobot-record" | grep -v pgrep || true)
-[ -n "$busy" ] && echo "note: a recording session is running; training uses the GPU only, the session is unaffected"
+[ -n "$busy" ] && echo "note: a recording session is running: the episodes it is still writing are left for the next run; training uses the GPU only"
 "$LR_PY" -m yam_mdf.cache --dataset "$ds"
 if [ "$mode" = ablation ]; then
   for m in both timestep modality sequence; do "$LR_PY" -m yam_mdf.train --dataset "$ds" --noise-mode "$m" "$@"; done
