@@ -124,3 +124,30 @@ Immediate saving: LeRobot 0.5's `record()` saves an episode only after its reset
 Cameras: `microdia_left_side` was dropped on Nov 22 (its view was disturbed). It is no longer recorded or converted, and
 it was removed from `data/lerobot/screw_from_rest` with `lerobot-edit-dataset --operation.type remove_feature`; the
 4-camera original is in `data/lerobot/_backup_screw_from_rest_4cam`.
+
+## MDF-lite training (diffusion forcing, project plan)
+
+After recording, one command updates the feature cache (only new episodes are encoded) and trains:
+
+```bash
+./train_mdf.sh                               # MDF: independent noise per (time step x modality), ~12 min on the 4090
+./train_mdf.sh screw_from_rest ablation      # all four noise modes in turn, then a comparison table (~50 min)
+./train.sh screw_from_rest                   # baseline policy (LeRobot ACT) on the same dataset
+```
+
+| Piece | What it is |
+|---|---|
+| `yam_mdf/cache.py` | dataset → `data/mdf_cache/<dataset>/ep_NNNN.npz`: 10 Hz steps, state (21), action (7), frozen ImageNet ResNet18 feature (512) per camera |
+| `yam_mdf/data.py` | modalities **action** (7), **proprio** (pos + vel, 14), **force** (effort, 7), **vision** (PCA 32 per camera); standardised on the training episodes |
+| `yam_mdf/model.py` | causal transformer over (time × modality) tokens; each token has its own noise level k ∈ [0, 100]; predicts clean tokens; DDIM sampling with any mix of known / noisy / unknown tokens |
+| `yam_mdf/train.py` | `--noise-mode both` (MDF) / `timestep` (Diffusion Forcing) / `modality` / `sequence` (full-sequence diffusion); window = 8 history + 16 future steps; EMA weights; held-out evaluation |
+| `yam_mdf/report.py` | best held-out numbers of every run of a dataset, side by side |
+| `yam_mdf/policy.py` | `MDFPolicy(ckpt).act(states, past_actions, images)` → next 8 actions (raw units), optionally told the observation noise level |
+
+Held-out metrics (last 2 episodes by default, `--holdout N` / `--holdout-episodes 3,7`): `act_rmse` (rad, joints 1-6,
+next 8 actions), `hold_rmse` (repeat-the-last-action baseline: the model has to beat it), `grip_mae`, and
+`noisy_s{0.25,0.5,1.0}_{unaware,aware}`: action error when Gaussian noise is added to the observation history, given to
+the model as clean (unaware) or with its matching noise level (aware) — the plan's "robustness to noisy observations".
+
+**Next (not built yet):** a 10 Hz closed-loop runner that feeds `MDFPolicy.act` from the live robot and sends its
+actions through the `yam_follower` safety layer, for the plan's task-success evaluation against the ACT baseline.
