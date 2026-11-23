@@ -229,11 +229,36 @@ Commit history (oldest first):
 What is in git (as of the commit that added this document): all code; **all MDF-lite training runs in full**
 (`outputs/mdf/*`: config, training log, `ckpt_best.pt` + `ckpt_last.pt` of every run, demo figures, all 7 real-arm
 rollouts, the training and dashboard logs); the **MDF-lite feature cache** `data/mdf_cache/screw_from_rest/`
-(20 episodes, 28 MB — enough to retrain MDF-lite without the dataset). **Not in git:** the LeRobot dataset
-(`data/lerobot/`, 1.8 GB with its backup) and the raw MCAP recordings (`data/episodes/`, 2.7 GB; the rubiks rig
-logs, 4.2 GB): several files exceed GitHub's 100 MB per-file limit (largest 908 MB), Git LFS is not installed and its
-free quota is 1 GB. Where they should go (Hugging Face Hub, Git LFS with paid storage, or split files) was left as an
-open decision — see section 17. Until then they exist only on the rig PC.
+(20 episodes, 28 MB — enough to retrain MDF-lite without the dataset); and **all collected data as a split zip**
+in `archive/` (below).
+
+**`archive/` — every dataset and raw recording, zipped.** Several data files exceed GitHub's 100 MB per-file limit
+(largest 908 MB) and Git LFS is not installed (its free quota is 1 GB), so the data is stored as **one plain zip
+per item, each cut into 95 MB pieces** with `split` (`archive/<item>.zip.part000`, `.part001`, …; made by
+`archive/make_zip.sh`, deflate level 1, every zip under 4 GB so no ZIP64). A single split zip of everything
+(`zip -s 95m`, 8.9 GB) was tried first and **failed its restore test** (Info-ZIP 3.0 / unzip 6.0 mishandle split
+archives over 4 GB: "invalid compressed data", "overlapped components"), so it was not committed.
+
+| Zip (pieces in `archive/`) | Restores to | What | Size |
+|---|---|---|---|
+| `screw_from_rest.zip.part*` | `data/lerobot/screw_from_rest/` | the LeRobot dataset, 20 episodes, 3 cameras | 1.2 GB |
+| `backup_screw_from_rest_4cam.zip.part*` | `data/lerobot/_backup_screw_from_rest_4cam/` | the dataset at 8 episodes with `microdia_left_side` (before removal) | 0.6 GB |
+| `episodes_right_arm_20261122.zip.part*` | `data/episodes/right_arm_20261122/` | MCAP episodes 00000–00004 | 1.9 GB |
+| `episodes_pre_fix.zip.part*` | `data/episodes/_pre_fix/` | the first, pre-fix MCAP demo | 0.8 GB |
+| `rig_log_20261122_154451.zip.part*`, `rig_log_20261122_155452.zip.part*` | `data/rubiks_rig_logs/` | the continuous rig logs (on the rig PC in `robotics-rubiks-cube/data/real/logs/`) | 2.8 + 1.7 GB |
+
+`archive/MANIFEST.sha256` lists the SHA-256 of every original file. To get the data back:
+
+```bash
+archive/restore_zip.sh                 # into this repo's data/ (joins the pieces, unzips, checks every hash)
+archive/restore_zip.sh /some/dir       # or somewhere else
+# by hand, one item: cat archive/screw_from_rest.zip.part* > screw_from_rest.zip && unzip screw_from_rest.zip
+```
+
+The restore was tested before committing (every file's hash matched). The archive was pushed in commits of
+≤ 1.4 GB (`archive/commit_batches.sh`), because GitHub refuses a single push over 2 GB; the repository is therefore
+~9 GB and every clone downloads all of it (`git clone --filter=blob:none` + checking out only what you need avoids
+that).
 
 ### 4.2 robotics-rubiks-cube (dependency; `~/Desktop/experiments/rubiks_cube/robotics-rubiks-cube`)
 
@@ -494,7 +519,8 @@ lerobot-record's log lines: "Recording episode N", "Reset the environment", "Sav
 
 ## 12. Datasets
 
-All under `~/Desktop/ken-fitzie/data/` (git-ignored, this machine only).
+All under `~/Desktop/ken-fitzie/data/` (git-ignored as files; all of it is in git inside the split zip
+`archive/*.zip.part*` — restore with `archive/restore_zip.sh`, section 4.1).
 
 | Path | What |
 |---|---|
@@ -687,6 +713,8 @@ signalling the wrapper's PID leaves the Python process running (happened once wi
 
 On a fresh machine with the two arms, the cameras and this repo:
 
+0. **Data**: `git checkout follower-fix-pyramid-cache && archive/restore_zip.sh` puts every dataset and recording
+   back under `data/` (checks all hashes).
 1. **Rubiks repo** (needs `vendor/i2rt` and `vendor/hwdeps`, which are git-ignored there — copy them from this
    machine): place at `~/Desktop/experiments/rubiks_cube/robotics-rubiks-cube` or set `RUBIKS=…`.
 2. **CAN**: install `99-yam-can.rules` (section 2.2), plug the adapters (preferably directly into the PC), check
@@ -723,9 +751,10 @@ On a fresh machine with the two arms, the cameras and this repo:
    holding vs open), wrist-roll contact torque weak (0.23 vs 0.15 N·m, noise 0.09). Describe it that way in the
    report.
 7. **Rubiks repo**: `teleop/urdf_gravity.py` still has the joint-limit bug; the rubiks changes are uncommitted.
-8. **The dataset and raw recordings are not backed up off this machine** (section 4.1): decide between a private
-   Hugging Face dataset repo (LeRobot's standard; `LeRobotDataset.push_to_hub`, needs a Hugging Face login),
-   Git LFS with paid GitHub storage, or splitting files under 100 MB. Losing this PC's disk would lose them.
+8. The datasets and raw recordings are in git only as the split zip in `archive/` (section 4.1). New recordings
+   after Nov 22 are **not** in it: rerun `archive/make_zip.sh` (add sources to it) and `archive/commit_batches.sh`,
+   or move to a private Hugging Face dataset repo (LeRobot's standard, `LeRobotDataset.push_to_hub`) as the data
+   grows.
 9. `BobyWoby` has not accepted the repo invitation; "owner" rights need an organisation.
 10. Untested: the `--no-vision` idea (not implemented); closed-loop success of the demo model (not observed).
 
@@ -757,6 +786,9 @@ yam-teleop (`~/Desktop/ken-fitzie`):
 | `outputs/mdf/check9_both/` | first check run (config, log, figures) |
 | `docs/EECS553_Team16_Project_Plan.pdf` | the project plan |
 | `docs/HANDOFF.md` | this document |
+| `archive/*.zip.part*` | all datasets and raw recordings: one zip per item, cut into 95 MB pieces |
+| `archive/MANIFEST.sha256` | SHA-256 of every original file in the zip |
+| `archive/make_zip.sh`, `restore_zip.sh`, `commit_batches.sh` | build the zip; restore and verify it; commit/push it in ≤ 1.4 GB batches |
 
 Ports: 8780 control page (and the stage-1 teleop page), 8781 session/runner page, 8090 old camera wall,
 8790 training dashboard (was running at the time of writing), 8770 the old `se3_jog` page.
