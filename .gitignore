@@ -1,7 +1,13 @@
 __pycache__/
 *.pyc
 data/
-outputs/
+# outputs: MDF-lite run records are kept (config, training log, demo figures, real-arm rollouts); checkpoints are
+# 20 MB each, so only the one the demo runs is kept
+outputs/*
+!outputs/mdf/
+outputs/mdf/*.log
+outputs/mdf/*/*.pt
+!outputs/mdf/screw_from_rest_timestep/ckpt_best.pt
 *.mcap
 *.mcap.part
 wandb/
