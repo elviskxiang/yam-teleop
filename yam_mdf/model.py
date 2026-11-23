@@ -100,12 +100,13 @@ class MDF(nn.Module):
         return (steps + lag[None] - m).clamp(0, steps)
 
     @torch.no_grad()
-    def sample(self, known, known_level, steps=20, schedule="full", uncertainty=1.0):
+    def sample(self, known, known_level, steps=20, schedule="full", uncertainty=1.0, trace=None):
         """Denoise the unknown tokens from level K to 0 (DDIM, deterministic), all together (schedule="full") or as a
         Diffusion Forcing pyramid (schedule="pyramid", see MDF.schedule).
         known: {m: (B, L, d_m)} values (anything where unknown); known_level: (B, L, M) long, -1 = unknown token,
         0 = clean observation, k > 0 = an observation already noisy at level k (MDF's noise-aware conditioning;
-        its value must be given as sqrt(alpha_bar_k) * x0 + sqrt(1 - alpha_bar_k) * noise)."""
+        its value must be given as sqrt(alpha_bar_k) * x0 + sqrt(1 - alpha_bar_k) * noise).
+        trace: a list; each denoising pass appends (levels (B, L, M) after the pass, {m: x0 estimate}) (for plots)."""
         unknown = known_level < 0                                                # (B, L, M)
         x = {m: torch.where(unknown[..., i, None], torch.randn_like(known[m]), known[m]) for i, m in enumerate(self.mods)}
         sched = self.schedule(unknown, steps, schedule, uncertainty)
@@ -123,4 +124,7 @@ class MDF(nn.Module):
                 eps = (x[m] - aa.sqrt() * x0[m]) / (1 - aa).clamp(min=1e-8).sqrt()
                 nxt = bb.sqrt() * x0[m] + (1 - bb).sqrt() * eps
                 x[m] = torch.where(move[..., i, None], nxt, x[m])
+            if trace is not None:
+                trace.append((torch.where(unknown, b, 0), {m: torch.where(unknown[..., i, None], x0[m], x[m]).clone()
+                                                          for i, m in enumerate(self.mods)}))
         return x                                                                 # unknown tokens end at level 0 (= their x0)

@@ -143,11 +143,33 @@ After recording, one command updates the feature cache (only new episodes are en
 | `yam_mdf/train.py` | `--noise-mode both` (MDF) / `timestep` (Diffusion Forcing) / `modality` / `sequence` (full-sequence diffusion); window = 8 history + 16 future steps; EMA weights; held-out evaluation |
 | `yam_mdf/report.py` | best held-out numbers of every run of a dataset, side by side |
 | `yam_mdf/policy.py` | `MDFPolicy(ckpt).act(states, past_actions, images)` → next 8 actions (raw units), optionally told the observation noise level |
+| `yam_mdf/run.py` | closed-loop runner on the follower arm (`./run_mdf.sh`) |
+| `yam_mdf/demo_plot.py` | demo figures on a held-out episode |
 
 Held-out metrics (last 2 episodes by default, `--holdout N` / `--holdout-episodes 3,7`): `act_rmse` (rad, joints 1-6,
 next 8 actions), `hold_rmse` (repeat-the-last-action baseline: the model has to beat it), `grip_mae`, and
 `noisy_s{0.25,0.5,1.0}_{unaware,aware}`: action error when Gaussian noise is added to the observation history, given to
 the model as clean (unaware) or with its matching noise level (aware) — the plan's "robustness to noisy observations".
 
-**Next (not built yet):** a 10 Hz closed-loop runner that feeds `MDFPolicy.act` from the live robot and sends its
-actions through the `yam_follower` safety layer, for the plan's task-success evaluation against the ACT baseline.
+Sampling: `--sample-schedule full` denoises the whole future together; `pyramid` is Diffusion Forcing's schedule (the
+near future is clean first, each further step lags `--uncertainty` passes). Every evaluation logs both.
+
+### Demo: the policy on the arm, and the backup figures
+
+```bash
+./train_mdf.sh screw_from_rest timestep --sample-schedule pyramid   # the paper's Diffusion Forcing (noise per time step)
+./run_mdf.sh outputs/mdf/screw_from_rest_timestep/ckpt_best.pt --seconds 60
+PYTHONPATH=$LR_PYTHONPATH $LR_PY -m yam_mdf.demo_plot outputs/mdf/screw_from_rest_timestep/ckpt_best.pt
+```
+
+`run_mdf.sh` (`yam_mdf/run.py`) runs the policy closed loop on the follower: at 10 Hz it reads the arm and cameras and
+keeps the last 0.8 s; every 8 steps it denoises the next 1.6 s and executes the first 0.8 s (interpolated to 30 Hz).
+Actions go through the `yam_follower` plugin, so the safety layer is the same as when recording (slow engage, speed
+limit `--max-vel` 1.0 rad/s by default, collision checks, blocked joints, dead-arm detection); its page is on
+http://127.0.0.1:8781. Close the control page first (its camera preview holds the cameras). Before starting: the left
+arm at rest (the collision check assumes it there), the scene as in the recordings, a hand ready. Ctrl+C or Esc stops:
+the arm parks, then torque is cut. Each run is saved to `outputs/mdf/<run>/rollouts/`.
+
+`yam_mdf.demo_plot` writes to `outputs/mdf/<run>/demo/`: `rollout_ep<N>.png` (on a held-out episode, a prediction every
+0.8 s against what the operator did, per joint) and `pyramid_ep<N>_t<T>.png` (the pyramid's noise level per future step
+and pass, and one joint's estimate settling near-first).
