@@ -186,7 +186,12 @@ python) and **`LR_PYTHONPATH`** = this repo + `rubiks/scripts/hw` + `rubiks/vend
 
 ## 4. The two repositories
 
-### 4.1 yam-teleop (`~/Desktop/ken-fitzie`, GitHub `elviskxiang/yam-teleop`, private, branch `main`)
+### 4.1 yam-teleop (`~/Desktop/ken-fitzie`, GitHub `elviskxiang/yam-teleop`, private)
+
+**Branches:** `main` ends at 3a429a0 (the MDF-lite pipeline). Everything after it — the gravity fix, pyramid
+sampling, the runner, the dashboard, the demo model, the tracked runs/cache and this document — is on branch
+**`follower-fix-pyramid-cache`** (created by the second session; pushed to GitHub at the end of the day; **not yet
+merged into `main`**). Check it out to get the current state: `git checkout follower-fix-pyramid-cache`.
 
 Created today at 15:55 from this session. Access: owner `elviskxiang`; collaborator **`fhung1`** (accepted);
 **`BobyWoby`** invited (still pending at the time of writing). Both were asked to be "owners"; a personal-account
