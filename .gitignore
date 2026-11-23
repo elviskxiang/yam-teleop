@@ -1,13 +1,13 @@
 __pycache__/
 *.pyc
-data/
-# outputs: MDF-lite run records are kept (config, training log, demo figures, real-arm rollouts); checkpoints are
-# 20 MB each, so only the one the demo runs is kept
+# data: the MDF-lite feature cache (28 MB) is tracked; the datasets and raw MCAP recordings are too large for git
+# (single files up to 908 MB; GitHub rejects files over 100 MB): see docs/HANDOFF.md section 12 for where they are
+data/*
+!data/mdf_cache/
+# outputs: every MDF-lite run is tracked in full (config, training log, checkpoints ~20 MB each, demo figures,
+# real-arm rollouts) plus the training / dashboard logs
 outputs/*
 !outputs/mdf/
-outputs/mdf/*.log
-outputs/mdf/*/*.pt
-!outputs/mdf/screw_from_rest_timestep/ckpt_best.pt
 *.mcap
 *.mcap.part
 wandb/

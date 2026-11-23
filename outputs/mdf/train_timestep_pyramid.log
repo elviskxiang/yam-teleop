@@ -1,0 +1,25 @@
+episode 9: 396 steps at 10 Hz cached
+episode 10: 346 steps at 10 Hz cached
+episode 11: 483 steps at 10 Hz cached
+episode 12: 501 steps at 10 Hz cached
+episode 13: 504 steps at 10 Hz cached
+episode 14: 430 steps at 10 Hz cached
+episode 15: 376 steps at 10 Hz cached
+episode 16: 390 steps at 10 Hz cached
+episode 17: 389 steps at 10 Hz cached
+episode 18: 358 steps at 10 Hz cached
+episode 19: 413 steps at 10 Hz cached
+{"cache": "/home/ekx/Desktop/ken-fitzie/data/mdf_cache/screw_from_rest", "episodes": 20, "not_yet": [], "hz": 10.0, "cameras": ["c922", "d415_tripod_top", "microdia_right_base_plate"]}
+[screw_from_rest_timestep] train episodes [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17] (8058 steps at 10 Hz), held out [18, 19]; modalities {'action': 7, 'proprio': 14, 'force': 7, 'vision': 96}; window 24
+[screw_from_rest_timestep] model 4.94 M params
+[screw_from_rest_timestep] step 1000: sec 24.9000  action 0.0429  proprio 0.1198  force 0.1573  vision 0.2718  loss 0.1480  act_rmse 0.4118  grip_mae 0.1342  act_rmse_full 0.3930  hold_rmse 0.2443  noisy_s0.25_unaware 0.4115  noisy_s0.25_aware 0.3424  noisy_s0.5_unaware 0.4143  noisy_s0.5_aware 0.3856  noisy_s1.0_unaware 0.4170  noisy_s1.0_aware 0.3824
+[screw_from_rest_timestep] step 2000: sec 51.4000  action 0.0332  proprio 0.0952  force 0.1281  vision 0.2165  loss 0.1183  act_rmse 0.1933  grip_mae 0.1079  act_rmse_full 0.1938  hold_rmse 0.2443  noisy_s0.25_unaware 0.1926  noisy_s0.25_aware 0.1910  noisy_s0.5_unaware 0.1999  noisy_s0.5_aware 0.2035  noisy_s1.0_unaware 0.2133  noisy_s1.0_aware 0.2182
+[screw_from_rest_timestep] step 3000: sec 77.9000  action 0.0270  proprio 0.0827  force 0.1125  vision 0.1927  loss 0.1037  act_rmse 0.1618  grip_mae 0.0930  act_rmse_full 0.1638  hold_rmse 0.2443  noisy_s0.25_unaware 0.1640  noisy_s0.25_aware 0.1635  noisy_s0.5_unaware 0.1750  noisy_s0.5_aware 0.1637  noisy_s1.0_unaware 0.1930  noisy_s1.0_aware 0.1670
+[screw_from_rest_timestep] step 4000: sec 104.1000  action 0.0243  proprio 0.0749  force 0.1002  vision 0.1791  loss 0.0946  act_rmse 0.1394  grip_mae 0.0760  act_rmse_full 0.1490  hold_rmse 0.2443  noisy_s0.25_unaware 0.1456  noisy_s0.25_aware 0.1425  noisy_s0.5_unaware 0.1528  noisy_s0.5_aware 0.1415  noisy_s1.0_unaware 0.1773  noisy_s1.0_aware 0.1398
+[screw_from_rest_timestep] step 5000: sec 130.8000  action 0.0224  proprio 0.0690  force 0.0927  vision 0.1693  loss 0.0883  act_rmse 0.1332  grip_mae 0.0715  act_rmse_full 0.1368  hold_rmse 0.2443  noisy_s0.25_unaware 0.1380  noisy_s0.25_aware 0.1352  noisy_s0.5_unaware 0.1470  noisy_s0.5_aware 0.1315  noisy_s1.0_unaware 0.1715  noisy_s1.0_aware 0.1309
+[screw_from_rest_timestep] step 6000: sec 157.3000  action 0.0210  proprio 0.0651  force 0.0874  vision 0.1626  loss 0.0840  act_rmse 0.1305  grip_mae 0.0609  act_rmse_full 0.1310  hold_rmse 0.2443  noisy_s0.25_unaware 0.1360  noisy_s0.25_aware 0.1301  noisy_s0.5_unaware 0.1422  noisy_s0.5_aware 0.1302  noisy_s1.0_unaware 0.1693  noisy_s1.0_aware 0.1224
+[screw_from_rest_timestep] step 7000: sec 184.3000  action 0.0193  proprio 0.0621  force 0.0832  vision 0.1585  loss 0.0808  act_rmse 0.1293  grip_mae 0.0603  act_rmse_full 0.1312  hold_rmse 0.2443  noisy_s0.25_unaware 0.1321  noisy_s0.25_aware 0.1261  noisy_s0.5_unaware 0.1410  noisy_s0.5_aware 0.1243  noisy_s1.0_unaware 0.1635  noisy_s1.0_aware 0.1255
+[screw_from_rest_timestep] step 8000: sec 210.7000  action 0.0196  proprio 0.0606  force 0.0802  vision 0.1555  loss 0.0790  act_rmse 0.1277  grip_mae 0.0692  act_rmse_full 0.1281  hold_rmse 0.2443  noisy_s0.25_unaware 0.1300  noisy_s0.25_aware 0.1254  noisy_s0.5_unaware 0.1357  noisy_s0.5_aware 0.1227  noisy_s1.0_unaware 0.1616  noisy_s1.0_aware 0.1222
+[screw_from_rest_timestep] step 9000: sec 235.9000  action 0.0186  proprio 0.0596  force 0.0776  vision 0.1544  loss 0.0775  act_rmse 0.1290  grip_mae 0.0617  act_rmse_full 0.1290  hold_rmse 0.2443  noisy_s0.25_unaware 0.1273  noisy_s0.25_aware 0.1233  noisy_s0.5_unaware 0.1347  noisy_s0.5_aware 0.1230  noisy_s1.0_unaware 0.1594  noisy_s1.0_aware 0.1201
+[screw_from_rest_timestep] step 10000: sec 260.9000  action 0.0184  proprio 0.0587  force 0.0790  vision 0.1542  loss 0.0776  act_rmse 0.1251  grip_mae 0.0588  act_rmse_full 0.1267  hold_rmse 0.2443  noisy_s0.25_unaware 0.1270  noisy_s0.25_aware 0.1232  noisy_s0.5_unaware 0.1352  noisy_s0.5_aware 0.1240  noisy_s1.0_unaware 0.1605  noisy_s1.0_aware 0.1187
+{"run": "screw_from_rest_timestep", "best_act_rmse": 0.1250714659690857, "out": "/home/ekx/Desktop/ken-fitzie/outputs/mdf/screw_from_rest_timestep"}

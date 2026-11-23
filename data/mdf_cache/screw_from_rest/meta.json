@@ -1,0 +1,44 @@
+{
+ "dataset": "screw_from_rest",
+ "fps": 30,
+ "hz": 10.0,
+ "stride": 3,
+ "encoder": "resnet18_imagenet_240x320_avgpool",
+ "cameras": [
+  "c922",
+  "d415_tripod_top",
+  "microdia_right_base_plate"
+ ],
+ "state_names": [
+  "joint1.pos",
+  "joint2.pos",
+  "joint3.pos",
+  "joint4.pos",
+  "joint5.pos",
+  "joint6.pos",
+  "gripper.pos",
+  "joint1.vel",
+  "joint2.vel",
+  "joint3.vel",
+  "joint4.vel",
+  "joint5.vel",
+  "joint6.vel",
+  "gripper.vel",
+  "joint1.effort",
+  "joint2.effort",
+  "joint3.effort",
+  "joint4.effort",
+  "joint5.effort",
+  "joint6.effort",
+  "gripper.effort"
+ ],
+ "action_names": [
+  "joint1.pos",
+  "joint2.pos",
+  "joint3.pos",
+  "joint4.pos",
+  "joint5.pos",
+  "joint6.pos",
+  "gripper.pos"
+ ]
+}
